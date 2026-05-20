@@ -11,7 +11,6 @@ export default async function handler(req, res) {
   try {
     const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
 
-    // Inject Euka auth token into mcp_servers if present
     if (body.mcp_servers) {
       body.mcp_servers = body.mcp_servers.map(s =>
         s.name === "euka-mcp"
