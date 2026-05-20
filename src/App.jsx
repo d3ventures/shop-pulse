@@ -1942,9 +1942,32 @@ function BrandDashboard({ brandId, brandName, brandColor, onBack }) {
   ];
 
   // Get store id from the current brand context (brandId prop maps to EUKA_STORES)
-  const currentEukaStore = Object.values(EUKA_STORES).find(s=>
-    brandId ? s.id && brandName && s.name.toLowerCase().includes(brandName.toLowerCase().split(" ")[0].toLowerCase()) : false
-  ) || EUKA_STORES.heritage;
+  const [selectedEukaStoreKey, setSelectedEukaStoreKey] = useState(()=>{
+    // Auto-select based on brandName if available
+    if (brandName) {
+      const match = Object.entries(EUKA_STORES).find(([,s])=>
+        s.name.toLowerCase().includes(brandName.toLowerCase().split(" ")[0].toLowerCase()) ||
+        brandName.toLowerCase().includes(s.name.toLowerCase().split(" ")[0].toLowerCase())
+      );
+      if (match) return match[0];
+    }
+    return "heritage";
+  });
+
+  const currentEukaStore = (() => {
+    // Manual override from dropdown
+    if (selectedEukaStoreKey && EUKA_STORES[selectedEukaStoreKey]) return EUKA_STORES[selectedEukaStoreKey];
+    // Auto-match from brandName prop
+    if (brandName) {
+      const match = Object.values(EUKA_STORES).find(s=>
+        s.name.toLowerCase().includes(brandName.toLowerCase().split(" ")[0].toLowerCase()) ||
+        brandName.toLowerCase().includes(s.name.toLowerCase().split(" ")[0].toLowerCase())
+      );
+      if (match) return match;
+    }
+    // Default to Heritage Store
+    return EUKA_STORES.heritage;
+  })();
 
   const TABS = ["sop","snapshot","data import","overview","products","channels","ads","weekly strategy","goals & projections","profitability","inventory","competitors","launches","catalog"];
 
@@ -2752,10 +2775,20 @@ function BrandDashboard({ brandId, brandName, brandColor, onBack }) {
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:12, flexWrap:"wrap", gap:10 }}>
                 <div>
                   <div style={{ fontSize:9, letterSpacing:2, textTransform:"uppercase", color:"#c77dff", fontWeight:700, marginBottom:4 }}>Affiliate Intelligence — powered by Euka</div>
+                  <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:4 }}>
+                    <span style={{ fontSize:10, color:"#555" }}>Store:</span>
+                    <select value={selectedEukaStoreKey} onChange={e=>{ setSelectedEukaStoreKey(e.target.value); setEukaData({}); setEukaCompareData({}); }}
+                      style={{ background:"rgba(255,255,255,0.08)", border:"1px solid rgba(199,125,255,0.3)", borderRadius:6, padding:"3px 10px", color:"#c77dff", fontFamily:"inherit", fontSize:11, fontWeight:700, outline:"none", cursor:"pointer" }}>
+                      {Object.entries(EUKA_STORES).map(([key,store])=>(
+                        <option key={key} value={key} style={{ background:"#1a1a2e", color:"#e8e8f0" }}>{store.name}</option>
+                      ))}
+                    </select>
+                    <span style={{ fontSize:9, color:"#444" }}>auto-matched to brand · change if needed</span>
+                  </div>
                   <div style={{ fontSize:11, color:"#555" }}>
                     {eukaData[currentEukaStore.id]
                       ? `${eukaData[currentEukaStore.id].summary?.totalCreators?.toLocaleString()||0} total creators · ${eukaData[currentEukaStore.id].summary?.creatorsWithGmv?.toLocaleString()||0} with GMV · $${((eukaData[currentEukaStore.id].summary?.totalGmv||0)/1000).toFixed(1)}k${eukaDateFrom||eukaDateTo?" in period":" all-time"}`
-                      : "Click Refresh to load live data from Euka"}
+                      : "Select a store and click Refresh to load live data from Euka"}
                   </div>
                 </div>
                 <div style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap" }}>
