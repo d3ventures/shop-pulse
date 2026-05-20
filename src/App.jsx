@@ -607,6 +607,230 @@ function BrandDashboard({ brandId, brandName, brandColor, onBack }) {
     });
     return map;
   };
+  // Parse ads creative export (creative_data_for_product_campaigns)
+  const parseAdsCreative = (text) => {
+    const lines = text.trim().split("\n").filter(l=>l.trim());
+    if (lines.length<2) return { error:"Need header row + data rows." };
+    const delim = lines[0].includes("\t")?"\t":",";
+    const rawHeaders = lines[0].split(delim).map(h=>h.trim().replace(/^"|"$/g,""));
+    const h = rawHeaders.map(x=>x.toLowerCase());
+    const fi = (aliases) => h.findIndex(c=>aliases.some(a=>c.includes(a)));
+    const COL = {
+      campaignName: fi(["campaign name"]),
+      productId:    fi(["product id"]),
+      creativeType: fi(["creative type"]),
+      videoTitle:   fi(["video title"]),
+      tiktokAccount:fi(["tiktok account"]),
+      timePosted:   fi(["time posted"]),
+      cost:         fi(["cost"]),
+      skuOrders:    fi(["sku orders"]),
+      costPerOrder: fi(["cost per order"]),
+      grossRevenue: fi(["gross revenue"]),
+      roi:          fi(["roi"]),
+      impressions:  fi(["product ad impressions"]),
+      clicks:       fi(["product ad clicks"]),
+      ctr:          fi(["product ad click rate"]),
+      cvr:          fi(["ad conversion rate"]),
+      vcr100:       fi(["100% ad video view rate"]),
+      vcr25:        fi(["25% ad video view rate"]),
+    };
+    const g = (cols,k) => COL[k]>=0?String(cols[COL[k]]||"").trim().replace(/^"|"$/g,""):"";
+    const n = (cols,k) => parseFloat(g(cols,k).replace(/[$,%\s]/g,""))||0;
+    const rows = lines.slice(1).map((line,idx)=>{
+      const cols = line.split(delim).map(c=>c.trim().replace(/^"|"$/g,""));
+      const name = g(cols,"videoTitle")||g(cols,"campaignName"); if (!name) return null;
+      return {
+        id: "cr_"+idx, name,
+        campaignName: g(cols,"campaignName"),
+        creativeType: g(cols,"creativeType"),
+        account:      g(cols,"tiktokAccount"),
+        posted:       g(cols,"timePosted"),
+        spend:        n(cols,"cost"),
+        orders:       n(cols,"skuOrders"),
+        revenue:      n(cols,"grossRevenue"),
+        roas:         n(cols,"roi"),
+        impressions:  n(cols,"impressions"),
+        clicks:       n(cols,"clicks"),
+        ctr:          n(cols,"ctr"),
+        cvr:          n(cols,"cvr"),
+        vcr:          n(cols,"vcr100"),
+        type:         "spark",
+      };
+    }).filter(Boolean);
+    return { rows, type:"ads_creative", count:rows.length };
+  };
+
+  // Parse campaign report (Heritage_Store-Campaign_Report)
+  const parseAdsCampaign = (text) => {
+    const lines = text.trim().split("\n").filter(l=>l.trim());
+    if (lines.length<2) return { error:"Need header row + data rows." };
+    const delim = lines[0].includes("\t")?"\t":",";
+    const rawHeaders = lines[0].split(delim).map(h=>h.trim().replace(/^"|"$/g,""));
+    const h = rawHeaders.map(x=>x.toLowerCase());
+    const fi = (aliases) => h.findIndex(c=>aliases.some(a=>c.includes(a)));
+    const COL = {
+      name:        fi(["campaign name"]),
+      status:      fi(["primary status"]),
+      budget:      fi(["campaign budget"]),
+      cost:        fi(["cost"]),
+      cpc:         fi(["cpc"]),
+      cpm:         fi(["cpm"]),
+      impressions: fi(["impressions"]),
+      clicks:      fi(["clicks"]),
+      ctr:         fi(["ctr"]),
+      conversions: fi(["conversions"]),
+      cvr:         fi(["conversion rate","cvr"]),
+      cpa:         fi(["cost per conversion"]),
+    };
+    const g = (cols,k) => COL[k]>=0?String(cols[COL[k]]||"").trim().replace(/^"|"$/g,""):"";
+    const n = (cols,k) => parseFloat(g(cols,k).replace(/[$,%\s]/g,""))||0;
+    const rows = lines.slice(1).map((line,idx)=>{
+      const cols = line.split(delim).map(c=>c.trim().replace(/^"|"$/g,""));
+      const name = g(cols,"name"); if (!name) return null;
+      return {
+        id:"camp_"+idx, name,
+        spend:       n(cols,"cost"),
+        revenue:     0,  // campaign reports don't always have attributed revenue
+        roas:        0,
+        impressions: n(cols,"impressions"),
+        clicks:      n(cols,"clicks"),
+        ctr:         n(cols,"ctr"),
+        cpm:         n(cols,"cpm"),
+        cpc:         n(cols,"cpc"),
+        conversions: n(cols,"conversions"),
+        cvr:         n(cols,"cvr"),
+        videoViews:  0,
+        vcr:         0,
+        type:        "infeed",
+      };
+    }).filter(Boolean);
+    return { rows, type:"ads_campaign", count:rows.length };
+  };
+
+  // Parse GMV Max / product campaign data
+  const parseAdsGMVMax = (text) => {
+    const lines = text.trim().split("\n").filter(l=>l.trim());
+    if (lines.length<2) return { error:"Need header row + data rows." };
+    const delim = lines[0].includes("\t")?"\t":",";
+    const rawHeaders = lines[0].split(delim).map(h=>h.trim().replace(/^"|"$/g,""));
+    const h = rawHeaders.map(x=>x.toLowerCase());
+    const fi = (aliases) => h.findIndex(c=>aliases.some(a=>c.includes(a)));
+    const COL = {
+      name:        fi(["campaign name"]),
+      id:          fi(["campaign id"]),
+      cost:        fi(["cost"]),
+      netCost:     fi(["net cost"]),
+      skuOrders:   fi(["sku orders"]),
+      costPerOrder:fi(["cost per order"]),
+      grossRevenue:fi(["gross revenue"]),
+      roi:         fi(["roi"]),
+    };
+    const g = (cols,k) => COL[k]>=0?String(cols[COL[k]]||"").trim().replace(/^"|"$/g,""):"";
+    const n = (cols,k) => parseFloat(g(cols,k).replace(/[$,%\s]/g,""))||0;
+    const rows = lines.slice(1).map((line,idx)=>{
+      const cols = line.split(delim).map(c=>c.trim().replace(/^"|"$/g,""));
+      const name = g(cols,"name")||g(cols,"id"); if (!name) return null;
+      return {
+        id:"gmv_"+idx, name,
+        spend:       n(cols,"cost"),
+        revenue:     n(cols,"grossRevenue"),
+        roas:        n(cols,"roi"),
+        orders:      n(cols,"skuOrders"),
+        cpa:         n(cols,"costPerOrder"),
+        impressions:0, clicks:0, ctr:0, cpm:0, cpc:0, conversions:0, cvr:0, videoViews:0, vcr:0,
+        type:        "gmvmax",
+      };
+    }).filter(Boolean);
+    return { rows, type:"ads_gmvmax", count:rows.length };
+  };
+
+  // Master file parser — detects type and routes
+  const parseFile = (text, filename="") => {
+    const lines = text.trim().split("\n").filter(l=>l.trim());
+    if (lines.length<2) return { error:"File appears empty or has only one row.", type:"unknown", rows:[] };
+    const delim = lines[0].includes("\t")?"\t":",";
+    const headers = lines[0].split(delim).map(h=>h.trim().replace(/^"|"$/g,""));
+    const dataRows = lines.slice(1).map(l=>l.split(delim).map(c=>c.trim().replace(/^"|"$/g,"")));
+    const fileType = detectFileType(headers);
+    const result = parseFileByType(fileType, headers, dataRows);
+    return { ...result, count: result.rows?.length||0 };
+  };
+
+  const FILE_TYPE_META = {
+    tiktok_orders:  { label:"TikTok Orders",         color:"#00e5a0", bg:"rgba(0,229,160,0.08)",   dest:"Profitability & Orders" },
+    shopify_orders: { label:"Shopify Orders",         color:"#ff6b35", bg:"rgba(255,107,53,0.08)",  dest:"Profitability & Reconciliation" },
+    ads_creative:   { label:"Ads — Creative Data",   color:"#c77dff", bg:"rgba(199,125,255,0.08)", dest:"Ads tab" },
+    ads_campaign:   { label:"Ads — Campaign Report", color:"#c77dff", bg:"rgba(199,125,255,0.08)", dest:"Ads tab" },
+    ads_gmvmax:     { label:"Ads — GMV Max",         color:"#c77dff", bg:"rgba(199,125,255,0.08)", dest:"Ads tab" },
+    inventory:      { label:"Inventory",             color:"#f5c518", bg:"rgba(245,197,24,0.08)",  dest:"Inventory tab" },
+    performance:    { label:"Sales & Performance",   color:"#00e5a0", bg:"rgba(0,229,160,0.08)",   dest:"Products & Overview" },
+    unknown:        { label:"Unknown",               color:"#ff4d6d", bg:"rgba(255,77,109,0.08)",  dest:"Could not detect" },
+  };
+
+  // Batch file state
+  const [batchFiles,    setBatchFiles]    = useState([]);   // [{name, type, result, committed}]
+  const [batchError,    setBatchError]    = useState("");
+  const [batchDone,     setBatchDone]     = useState(false);
+  const [reconResult,   setReconResult]   = useState(null); // reconciled orders
+  const batchDropRef = useRef();
+
+  const processBatchFiles = (fileList) => {
+    setBatchError(""); setBatchDone(false);
+    const results = [];
+    let pending = fileList.length;
+    Array.from(fileList).forEach(file=>{
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const text = e.target.result;
+        const result = parseFile(text, file.name);
+        results.push({ name:file.name, result, committed:false });
+        pending--;
+        if (pending===0) {
+          // Sort: tiktok_orders + shopify_orders first for reconciliation
+          results.sort((a,b)=>{ const order={tiktok_orders:0,shopify_orders:1,ads_creative:2,ads_campaign:3,ads_gmvmax:4,inventory:5,performance:6}; return (order[a.result.type]||9)-(order[b.result.type]||9); });
+          // Auto-reconcile if both order types present
+          const ttRows = results.find(r=>r.result.type==="tiktok_orders");
+          const shopRows = results.find(r=>r.result.type==="shopify_orders");
+          if (ttRows&&shopRows&&!ttRows.result.error&&!shopRows.result.error) {
+            const reconciled = reconcileOrders(ttRows.result.rows, shopRows.result.rows);
+            setReconResult({ rows:reconciled, matchCount:reconciled.filter(r=>r.matched).length, total:reconciled.length });
+          }
+          setBatchFiles([...results]);
+        }
+      };
+      reader.readAsText(file);
+    });
+  };
+
+  const commitBatchFile = (idx) => {
+    const item = batchFiles[idx];
+    if (!item||item.result.error) return;
+    const { type, rows } = item.result;
+
+    if (type==="tiktok_orders"||type==="shopify_orders") {
+      // Use reconciled result if available
+      const finalRows = reconResult?.rows || rows;
+      setOrders(prev=>{
+        const u=[...prev];
+        finalRows.forEach(r=>{ const i=u.findIndex(o=>o.orderId===r.tiktokOrderId||o.orderId===r.shopifyOrderId); if(i>=0) u[i]={...u[i],...r}; else u.push({orderId:r.tiktokOrderId||r.shopifyOrderId, product:r.productName||"Unknown", salePrice:r.salePrice||r.orderAmount||0, tikTokFee:0, affiliateCom:0, discount:Math.abs(r.platformDisc||0)+Math.abs(r.sellerDisc||0), shipping:r.shipping||0, channel:r.channel||"tiktok", cogs:0, ...r}); });
+        return u;
+      });
+      setImportHistory(prev=>[{date:new Date().toLocaleString(),rowCount:rows.length,source:item.name},...prev.slice(0,19)]);
+    } else if (type==="ads_creative"||type==="ads_campaign"||type==="ads_gmvmax") {
+      setAdsData(prev=>[...prev.filter(a=>a.type!==rows[0]?.type),...rows]);
+    } else if (type==="inventory") {
+      setInvSettings(prev=>{ const u=[...prev]; rows.forEach(row=>{ const i=u.findIndex(s=>s.name.toLowerCase()===row.name.toLowerCase()); if(i>=0) u[i]={...u[i],unitsOnHand:row.units,incoming:row.incoming}; }); return u; });
+    } else {
+      setCatalog(prev=>{ const u=[...prev]; rows.forEach(imp=>{ const i=u.findIndex(p=>p.name.toLowerCase()===imp.name.toLowerCase()); if(i>=0) u[i]={...u[i],...imp,tags:u[i].tags,status:u[i].status,id:u[i].id}; else u.push(imp); }); return u; });
+      setImportHistory(prev=>[{date:new Date().toLocaleString(),rowCount:rows.length,source:item.name},...prev.slice(0,19)]);
+    }
+    setBatchFiles(prev=>prev.map((f,i)=>i===idx?{...f,committed:true}:f));
+  };
+
+  const commitAllBatch = () => {
+    batchFiles.forEach((_,idx)=>commitBatchFile(idx));
+    setBatchDone(true);
+  };
 
   const parseTSV = (text) => {
     const lines = text.trim().split("\n").filter(l=>l.trim());
@@ -685,20 +909,386 @@ function BrandDashboard({ brandId, brandName, brandColor, onBack }) {
   const [srcDone,      setSrcDone]      = useState({});
   const [activeSource, setActiveSource] = useState("performance");
   const multiFileRef = useRef();
+  // Parse any file given headers + data rows
+  const parseFileByType = (type, headers, dataRows) => {
+    const h = headers.map(x=>String(x||"").toLowerCase().trim());
+    const col = (name) => h.findIndex(c=>c.includes(name));
+    const g = (r,name) => { const i=col(name); return i>=0?String(r[i]||"").trim():""; };
+    const n = (r,name) => { const i=col(name); return i>=0?parseFloat(String(r[i]||"").replace(/[$,%\s]/g,""))||0:0; };
+
+    if (type==="tiktok_orders") return { type, rows: parseTikTokOrders(dataRows, headers) };
+    if (type==="shopify_orders") return { type, rows: parseShopifyOrders(dataRows, headers) };
+
+    if (type==="ads_creative") {
+      const rows = dataRows.map(r=>({
+        name:        g(r,"campaign name")||g(r,"video title"),
+        type:        "spark",
+        spend:       n(r,"cost"),
+        revenue:     n(r,"gross revenue"),
+        roas:        n(r,"roi"),
+        orders:      n(r,"sku orders"),
+        impressions: n(r,"product ad impressions"),
+        clicks:      n(r,"product ad clicks"),
+        ctr:         n(r,"product ad click rate"),
+        cvr:         n(r,"ad conversion rate"),
+        vcr:         n(r,"100% ad video view rate"),
+        videoTitle:  g(r,"video title"),
+        productId:   g(r,"product id"),
+      })).filter(r=>r.name);
+      return { type:"ads", rows };
+    }
+
+    if (type==="ads_campaign") {
+      const rows = dataRows.map(r=>({
+        name:        g(r,"campaign name"),
+        type:        "infeed",
+        spend:       n(r,"cost"),
+        revenue:     0,
+        roas:        0,
+        impressions: n(r,"impressions"),
+        clicks:      n(r,"clicks"),
+        ctr:         n(r,"ctr"),
+        cpm:         n(r,"cpm"),
+        cpc:         n(r,"cpc"),
+        conversions: n(r,"conversions"),
+        cvr:         n(r,"conversion rate"),
+      })).filter(r=>r.name);
+      return { type:"ads", rows };
+    }
+
+    if (type==="ads_gmvmax") {
+      const rows = dataRows.map(r=>({
+        name:    g(r,"campaign name"),
+        type:    "gmvmax",
+        spend:   n(r,"cost"),
+        revenue: n(r,"gross revenue"),
+        roas:    n(r,"roi"),
+        orders:  n(r,"sku orders"),
+        netCost: n(r,"net cost"),
+      })).filter(r=>r.name);
+      return { type:"ads", rows };
+    }
+
+    if (type==="profitability") {
+      const rows = dataRows.map(r=>({
+        orderId:          g(r,"order id"),
+        sku:              g(r,"sku id"),
+        subtotal:         n(r,"sku subtotal before discount"),
+        platformDiscount: n(r,"sku platform discount"),
+        sellerDiscount:   n(r,"sku seller discount"),
+        finalAmount:      n(r,"sku subtotal after discount"),
+        shipping:         n(r,"shipping fee after discount"),
+        taxes:            n(r,"taxes"),
+        orderAmount:      n(r,"order amount"),
+      })).filter(r=>r.orderId);
+      return { type:"profitability", rows };
+    }
+
+    if (type==="inventory") {
+      const result = parseInvPaste(dataRows.map(r=>r.join("\t")).join("\n"));
+      return { type:"inventory", rows: result.rows||[] };
+    }
+
+    // Default: try generic TSV parser
+    const text = [headers.join("\t"), ...dataRows.map(r=>r.join("\t"))].join("\n");
+    const result = parseTSV(text);
+    return { type: result.error?"unknown":"catalog", rows: result.rows||[], headers, map: result.map };
+  };
+
+  // ── File type detection based on real TikTok/Shopify export column signatures ──
+  const detectFileType = (headers) => {
+    const h = headers.map(x=>String(x||"").toLowerCase().trim());
+    const has = (...terms) => terms.every(t=>h.some(c=>c.includes(t)));
+    const hasAny = (...terms) => terms.some(t=>h.some(c=>c.includes(t)));
+
+    // TikTok order export (All_order CSV) — most specific first
+    if (has("order id") && has("sku subtotal before discount") && has("fulfillment type"))
+      return "tiktok_orders";
+    // Shopify order export
+    if (has("lineitem name") && has("financial status") && hasAny("billing name","billing address1"))
+      return "shopify_orders";
+    // Merchant P&L / Order payment info sheet
+    if (has("order id") && has("sku platform discount") && has("sku seller discount") && !has("fulfillment type"))
+      return "tiktok_orders";
+    // Creative / Video ad performance (has video title column)
+    if (has("video title") || has("creative type"))
+      return "ads_creative";
+    // Campaign report (standard — has CPC or CPM but no video title)
+    if (has("campaign name") && (has("cpc") || has("cpm")) && has("impressions"))
+      return "ads_campaign";
+    // GMV Max / Product campaign (has roi + sku orders + net cost)
+    if (has("campaign") && has("roi") && (has("sku orders") || has("gross revenue")))
+      return "ads_gmvmax";
+    // Inventory
+    if (has("units on hand") || has("available stock") || has("stock quantity"))
+      return "inventory";
+    // Catalog batch edit
+    if (has("product name") && has("seller sku") && hasAny("product status","listing status"))
+      return "catalog";
+    // Pricing
+    if (has("retail price") || (has("sale price") && has("cogs")))
+      return "pricing";
+    // Competitors
+    if (has("brand") && has("followers") && hasAny("commission","affiliate"))
+      return "competitors";
+    // Fallback: try sales/performance
+    if (hasAny("revenue","gmv","gross revenue") && hasAny("product name","product"))
+      return "performance";
+    return "unknown";
+  };
+
+  // ── Parse TikTok order export (All_order CSV) ──
+  const parseTikTokOrders = (rows, headers) => {
+    const h = headers.map(x=>String(x||"").toLowerCase().trim());
+    const ci = (terms) => { for(const t of terms){ const i=h.findIndex(c=>c.includes(t)); if(i>=0) return i; } return -1; };
+    const COL = {
+      orderId:    ci(["order id"]),
+      product:    ci(["product name"]),
+      sku:        ci(["seller sku","sku id"]),
+      status:     ci(["order status"]),
+      qty:        ci(["quantity"]),
+      unitPrice:  ci(["sku unit original price"]),
+      subtotal:   ci(["sku subtotal after discount","sku subtotal before discount"]),
+      platformDisc: ci(["sku platform discount"]),
+      sellerDisc: ci(["sku seller discount"]),
+      shipping:   ci(["shipping fee after discount"]),
+      taxes:      ci(["taxes"]),
+      orderAmt:   ci(["order amount"]),
+      created:    ci(["created time"]),
+      fulfillment:ci(["fulfillment type"]),
+      category:   ci(["product category"]),
+    };
+    return rows.filter(r=>r[COL.orderId]).map(r=>{
+      const g = (k) => COL[k]>=0 ? String(r[COL[k]]||"").trim() : "";
+      const n = (k) => parseFloat(g(k).replace(/[$,%\s]/g,""))||0;
+      return {
+        tiktokOrderId: g("orderId"),
+        product:       g("product").replace(/\s*\(.*?\)\s*/g,"").trim().slice(0,60),
+        sku:           g("sku"),
+        status:        g("status"),
+        qty:           n("qty")||1,
+        unitPrice:     n("unitPrice"),
+        subtotal:      n("subtotal"),
+        platformDisc:  Math.abs(n("platformDisc")),
+        sellerDisc:    Math.abs(n("sellerDisc")),
+        shipping:      n("shipping"),
+        taxes:         n("taxes"),
+        orderAmount:   n("orderAmt"),
+        date:          g("created").split("\\t")[0].trim(),
+        fulfillment:   g("fulfillment"),
+        category:      g("category"),
+        channel:       "tiktok",
+        source:        "tiktok_export",
+      };
+    });
+  };
+
+  // ── Parse Shopify order export ──
+  const parseShopifyOrders = (rows, headers) => {
+    const h = headers.map(x=>String(x||"").toLowerCase().trim());
+    const ci = (terms) => { for(const t of terms){ const i=h.findIndex(c=>c.includes(t)); if(i>=0) return i; } return -1; };
+    const COL = {
+      name:       ci(["name"]),
+      status:     ci(["financial status"]),
+      product:    ci(["lineitem name"]),
+      price:      ci(["lineitem price"]),
+      qty:        ci(["lineitem quantity"]),
+      sku:        ci(["lineitem sku"]),
+      subtotal:   ci(["subtotal"]),
+      total:      ci(["total"]),
+      discount:   ci(["discount amount"]),
+      shipping:   ci(["shipping"]),
+      taxes:      ci(["taxes"]),
+      tags:       ci(["tags"]),
+      created:    ci(["created at"]),
+      vendor:     ci(["vendor"]),
+    };
+    const g = (r,k) => COL[k]>=0 ? String(r[COL[k]]||"").trim() : "";
+    const n = (r,k) => parseFloat(g(r,k).replace(/[$,%\s]/g,""))||0;
+    // Extract TikTok order ID from Tags column
+    const extractTikTokId = (tags) => {
+      const m = String(tags||"").match(/TikTokOrderID:(\d+)/);
+      return m ? m[1] : null;
+    };
+    return rows.filter(r=>g(r,"name")).map(r=>({
+      shopifyOrderId: g(r,"name"),
+      tiktokOrderId:  extractTikTokId(g(r,"tags")),
+      product:        g(r,"product"),
+      sku:            g(r,"sku"),
+      qty:            n(r,"qty")||1,
+      lineItemPrice:  n(r,"price"),
+      subtotal:       n(r,"subtotal"),
+      total:          n(r,"total"),
+      discount:       n(r,"discount"),
+      shipping:       n(r,"shipping"),
+      taxes:          n(r,"taxes"),
+      status:         g(r,"status"),
+      date:           g(r,"created"),
+      vendor:         g(r,"vendor"),
+      source:         "shopify_export",
+    }));
+  };
+
+  // ── Parse TikTok ads exports (all three formats) ──
+  const parseTikTokAds = (rows, headers, adType) => {
+    const h = headers.map(x=>String(x||"").toLowerCase().trim());
+    const ci = (terms) => { for(const t of terms){ const i=h.findIndex(c=>c.includes(t)); if(i>=0) return i; } return -1; };
+    const COL = {
+      name:        ci(["campaign name","video title"]),
+      campaignId:  ci(["campaign id"]),
+      product:     ci(["product id","product name"]),
+      cost:        ci(["cost","net cost"]),
+      revenue:     ci(["gross revenue","revenue"]),
+      roi:         ci(["roi"]),
+      orders:      ci(["sku orders","conversions","results"]),
+      impressions: ci(["impressions","product ad impressions"]),
+      clicks:      ci(["clicks (destination)","clicks","product ad clicks"]),
+      ctr:         ci(["ctr (destination)","ctr","product ad click rate"]),
+      cpm:         ci(["cpm"]),
+      cpc:         ci(["cpc (destination)","cpc","cost per order"]),
+      cvr:         ci(["conversion rate (cvr)","ad conversion rate","cvr","result rate"]),
+      vcr:         ci(["100% ad video view rate","75% ad video view rate","6-second ad video view rate"]),
+      videoViews:  ci(["2-second ad video view rate","product ad impressions"]),
+      creativeType:ci(["creative type"]),
+      videoTitle:  ci(["video title"]),
+      tiktokAcct:  ci(["tiktok account"]),
+      status:      ci(["primary status","status"]),
+    };
+    const g = (r,k) => COL[k]>=0 ? String(r[COL[k]]||"").trim() : "";
+    const n = (r,k) => parseFloat(g(r,k).replace(/[$,%\s]/g,""))||0;
+    // Determine type from format
+    const inferType = (name) => {
+      const nl = String(name||"").toLowerCase();
+      if (nl.includes("gmv")) return "gmvmax";
+      if (nl.includes("spark")) return "spark";
+      if (nl.includes("live")) return "live";
+      return adType==="ads_creative"?"spark":adType==="ads_campaign"?"infeed":"gmvmax";
+    };
+    return rows.filter(r=>g(r,"name")).map(r=>({
+      name:        g(r,"name"),
+      campaignId:  g(r,"campaignId"),
+      product:     g(r,"product"),
+      type:        inferType(g(r,"name")),
+      spend:       n(r,"cost"),
+      revenue:     n(r,"revenue"),
+      roas:        n(r,"roi")||r2(n(r,"revenue")/(n(r,"cost")||1)),
+      orders:      n(r,"orders"),
+      impressions: n(r,"impressions"),
+      clicks:      n(r,"clicks"),
+      ctr:         n(r,"ctr"),
+      cpm:         n(r,"cpm"),
+      cpc:         n(r,"cpc"),
+      cvr:         n(r,"cvr"),
+      vcr:         n(r,"vcr"),
+      creativeType:g(r,"creativeType"),
+      videoTitle:  g(r,"videoTitle"),
+      tiktokAcct:  g(r,"tiktokAcct"),
+      status:      g(r,"status"),
+      source:      adType,
+    }));
+  };
+
+  // ── Master file auto-detector and router ──
+  const autoDetectAndParse = (text, filename="") => {
+    const lines = text.trim().split("\n").filter(l=>l.trim());
+    if (lines.length < 2) return { error:"Need at least a header row and one data row." };
+    const delim = lines[0].includes("\t") ? "\t" : ",";
+    const rawHeaders = lines[0].split(delim).map(h=>h.trim().replace(/^"|"$/g,""));
+    const dataLines  = lines.slice(1);
+    const dataRows   = dataLines.map(l=>l.split(delim).map(c=>c.trim().replace(/^"|"$/g,"")));
+    const fileType   = detectFileType(rawHeaders);
+    const h          = rawHeaders;
+
+    if (fileType==="tiktok_orders") {
+      const rows = parseTikTokOrders(dataRows, h);
+      return { type:"tiktok_orders", fileType, rows, count:rows.length,
+        label:"TikTok Orders", color:"#00e5a0",
+        preview: rows.slice(0,5).map(r=>({ "Order ID":r.tiktokOrderId, "Product":r.product, "Amount":"$"+r.orderAmount, "Status":r.status, "Date":r.date })) };
+    }
+    if (fileType==="shopify_orders") {
+      const rows = parseShopifyOrders(dataRows, h);
+      const linked = rows.filter(r=>r.tiktokOrderId).length;
+      return { type:"shopify_orders", fileType, rows, count:rows.length,
+        label:"Shopify Orders", color:"#ff6b35",
+        note: `${linked} of ${rows.length} orders have a TikTok Order ID — these will be reconciled automatically.`,
+        preview: rows.slice(0,5).map(r=>({ "Shopify #":r.shopifyOrderId, "TikTok ID":r.tiktokOrderId||"—", "Product":r.product, "Total":"$"+r.total, "Status":r.status })) };
+    }
+    if (fileType==="ads_creative"||fileType==="ads_campaign"||fileType==="ads_gmvmax") {
+      const rows = parseTikTokAds(dataRows, h, fileType);
+      return { type:"ads", fileType, rows, count:rows.length,
+        label: fileType==="ads_creative"?"Creative Ad Performance":fileType==="ads_campaign"?"Campaign Report":"GMV Max / Product Campaigns",
+        color:"#c77dff",
+        preview: rows.slice(0,5).map(r=>({ "Campaign":r.name.slice(0,40), "Spend":"$"+r.spend, "Revenue":"$"+r.revenue, "ROAS":r.roas+"x", "Orders":r.orders })) };
+    }
+    if (fileType==="inventory") {
+      const result = parseInvPaste(text);
+      return { type:"inventory", fileType, rows:result.rows||[], count:(result.rows||[]).length,
+        label:"Inventory", color:"#f5c518",
+        preview: (result.rows||[]).slice(0,5).map(r=>({ "Product":r.name, "Units on Hand":r.units })) };
+    }
+    if (fileType==="catalog") {
+      const result = parseTSV(text);
+      return { type:"catalog", fileType, rows:result.rows||[], count:(result.rows||[]).length,
+        label:"Product Catalog", color:"#00e5a0",
+        preview: (result.rows||[]).slice(0,5).map(r=>({ "Product":r.name, "SKU":r.sku, "Price":"$"+(r.retailPrice||0) })) };
+    }
+    if (fileType==="competitors") {
+      const result = parseCompPaste(text);
+      return { type:"competitors", fileType, rows:result.rows||[], count:(result.rows||[]).length,
+        label:"Competitors", color:"#ff4d6d",
+        preview: (result.rows||[]).slice(0,5).map(r=>({ "Brand":r.brand, "Niche":r.niche, "GMV":"$"+(r.monthlyGMV||0) })) };
+    }
+    // Fallback: generic performance/pricing
+    const result = parseTSV(text);
+    if (result.error) return { error: result.error, fileType:"unknown" };
+    return { type:"catalog", fileType:"performance", rows:result.rows||[], count:(result.rows||[]).length,
+      label:"Sales & Performance", color:"#00e5a0", headers:result.headers, map:result.map,
+      preview: (result.rows||[]).slice(0,5).map(r=>({ "Product":r.name, "Revenue":"$"+(r.revenue||0), "Units":r.units||"—" })) };
+  };
+
+  // ── Reconcile Shopify + TikTok orders ──
+  const reconcileOrders = (shopifyRows, tiktokRows) => {
+    return shopifyRows.map(s=>{
+      const match = s.tiktokOrderId ? tiktokRows.find(t=>t.tiktokOrderId===s.tiktokOrderId) : null;
+      return {
+        shopifyOrderId:  s.shopifyOrderId,
+        tiktokOrderId:   s.tiktokOrderId || match?.tiktokOrderId || "—",
+        product:         s.product || match?.product,
+        sku:             s.sku || match?.sku,
+        shopifyTotal:    s.total,
+        tiktokAmount:    match?.orderAmount || 0,
+        variance:        match ? r2(s.total - match.orderAmount) : null,
+        platformDisc:    match?.platformDisc || 0,
+        sellerDisc:      match?.sellerDisc || 0,
+        taxes:           s.taxes || match?.taxes || 0,
+        shipping:        s.shipping || match?.shipping || 0,
+        status:          s.status,
+        date:            s.date,
+        matched:         !!match,
+      };
+    });
+  };
+
+  // ── Batch import state ──────────────────────────────────────────────────────
+  // (batchFiles, processBatchFiles, commitBatchFile, commitAllBatch defined above at line ~936)
+  const [tiktokOrders,  setTiktokOrders]  = useState([]);
+  const [shopifyOrders, setShopifyOrders] = useState([]);
+  const [reconOrders,   setReconOrders]   = useState([]);
+  const batchFileInputRef = useRef();
 
   const SOURCES = [
     { id:"performance", label:"Sales & Performance", color:"#00e5a0", bg:"rgba(0,229,160,0.08)",
-      desc:"Product Name, SKU, Revenue, Units Sold, ROAS, Margin %, VCR %, Ad Spend, Retail Price",
+      desc:"Product Name, SKU, Revenue, Units Sold, ROAS, Margin %, VCR %, Ad Spend",
       placeholder:"Product Name\tRevenue\tUnits Sold\tROAS\tMargin %\tVCR %\tAd Spend\nGlow Serum 2.0\t4970\t142\t3.8\t38\t4.2\t412" },
     { id:"pricing",     label:"Pricing",             color:"#ff6b35", bg:"rgba(255,107,53,0.08)",
-      desc:"Product Name, Retail Price, Sale/Discounted Price, COGS",
+      desc:"Product Name, Retail Price, Sale Price, COGS",
       placeholder:"Product Name\tRetail Price\tSale Price\tCOGS\nGlow Serum 2.0\t44.99\t34.99\t7.80" },
     { id:"inventory",   label:"Inventory",           color:"#f5c518", bg:"rgba(245,197,24,0.08)",
-      desc:"Product Name, Units on Hand, Incoming Units (optional)",
-      placeholder:"Product Name\tUnits on Hand\tIncoming\nGlow Serum 2.0\t245\t100" },
+      desc:"Product Name, Units on Hand",
+      placeholder:"Product Name\tUnits on Hand\nGlow Serum 2.0\t245" },
     { id:"ads",         label:"Ads Manager",         color:"#c77dff", bg:"rgba(199,125,255,0.08)",
-      desc:"Ad Name, Spend, Revenue, ROAS, Impressions, Clicks, CTR, CPM, CPC, Conversions, CVR, Video Views, VCR",
-      placeholder:"Ad Name\tSpend\tRevenue\tROAS\tImpressions\tClicks\tCTR\nGMV Max\t1240\t4836\t3.9\t84200\t2106\t2.5" },
+      desc:"Campaign name, Cost, Gross revenue, ROI, Impressions, Clicks, CTR — all TikTok ad export formats supported",
+      placeholder:"Campaign name\tCost\tGross revenue\tROI\tImpressions\nGMV Max\t1240\t4836\t3.9\t84200" },
     { id:"competitors", label:"Competitors",         color:"#ff4d6d", bg:"rgba(255,77,109,0.08)",
       desc:"Brand, Niche, Followers, Monthly GMV, Running Ads (Y/N), Avg Commission %",
       placeholder:"Brand\tNiche\tFollowers\tMonthly GMV\tRunning Ads\tAvg Commission\nGlowLab Beauty\tSkincare\t284000\t187000\tY\t18" },
@@ -1846,155 +2436,150 @@ function BrandDashboard({ brandId, brandName, brandColor, onBack }) {
         {/* ── DATA IMPORT ── */}
         {tab==="data import" && (
           <div>
-            <div style={{ marginBottom:20 }}>
+            {/* Header */}
+            <div style={{ marginBottom:24 }}>
               <div style={{ fontSize:10, letterSpacing:2, textTransform:"uppercase", color:"#00e5a0", fontWeight:700, marginBottom:6 }}>Daily Data Import</div>
-              <div style={{ fontSize:18, fontWeight:700, color:"#fff", marginBottom:6 }}>Multi-Source Paste</div>
-              <div style={{ fontSize:12, color:"#555", lineHeight:1.7, maxWidth:660 }}>
-                Each data source has its own tab. Copy from your Google Sheet (Cmd+C) and paste into the right slot — headers are auto-detected per source so different sheet formats won't conflict.
+              <div style={{ fontSize:18, fontWeight:700, color:"#fff", marginBottom:6 }}>Drop Your Files</div>
+              <div style={{ fontSize:12, color:"#555", lineHeight:1.7, maxWidth:680 }}>
+                Drop all your export files at once — TikTok orders, Shopify orders, ads reports, inventory. Each file is automatically detected and routed to the right part of the dashboard. TikTok + Shopify orders are reconciled automatically.
               </div>
             </div>
 
-            {/* Progress pills */}
-            <div style={{ display:"flex", gap:8, marginBottom:20, flexWrap:"wrap", alignItems:"center" }}>
-              {SOURCES.map(s=>(
-                <div key={s.id} onClick={()=>setActiveSource(s.id)} style={{ display:"flex", alignItems:"center", gap:6, padding:"5px 14px", borderRadius:20, cursor:"pointer", background:srcDone[s.id]?"rgba(0,229,160,0.1)":activeSource===s.id?s.bg:"rgba(255,255,255,0.03)", border:`1px solid ${srcDone[s.id]?"rgba(0,229,160,0.3)":activeSource===s.id?s.color+"55":"rgba(255,255,255,0.07)"}` }}>
-                  <span style={{ fontSize:10, fontWeight:700, color:srcDone[s.id]?"#00e5a0":activeSource===s.id?s.color:"#555" }}>{srcDone[s.id]&&"✓ "}{s.label}</span>
-                  {(srcText[s.id]||"").length>0&&!srcDone[s.id]&&<span style={{ width:5, height:5, borderRadius:"50%", background:s.color }}/>}
-                </div>
-              ))}
-              <span style={{ fontSize:11, color:"#444", marginLeft:4 }}>{SOURCES.filter(s=>srcDone[s.id]).length}/{SOURCES.length} imported today</span>
+            {/* Batch drop zone */}
+            <div
+              onDragOver={e=>{ e.preventDefault(); e.currentTarget.style.borderColor="#00e5a0"; }}
+              onDragLeave={e=>{ e.currentTarget.style.borderColor="rgba(255,255,255,0.1)"; }}
+              onDrop={e=>{ e.preventDefault(); e.currentTarget.style.borderColor="rgba(255,255,255,0.1)"; processBatchFiles(e.dataTransfer.files); }}
+              onClick={()=>batchDropRef.current.click()}
+              style={{ border:"2px dashed rgba(255,255,255,0.1)", borderRadius:14, padding:"40px 20px", textAlign:"center", cursor:"pointer", marginBottom:20, transition:"border-color 0.15s", background:"rgba(255,255,255,0.02)" }}>
+              <input ref={batchDropRef} type="file" multiple accept=".csv,.xlsx,.tsv,.txt" onChange={e=>processBatchFiles(e.target.files)} style={{ display:"none" }}/>
+              <div style={{ fontSize:32, marginBottom:10 }}>⬇</div>
+              <div style={{ fontSize:14, fontWeight:700, color:"#e8e8f0", marginBottom:6 }}>Drop files here or click to browse</div>
+              <div style={{ fontSize:11, color:"#555" }}>Accepts: TikTok order exports, Shopify order exports, Ads Manager reports, Inventory files — all at once</div>
+              <div style={{ fontSize:10, color:"#444", marginTop:8 }}>CSV · XLSX · TSV</div>
             </div>
 
-            {/* Source tab buttons */}
-            <div style={{ display:"flex", gap:0, background:"rgba(255,255,255,0.03)", borderRadius:8, padding:4, border:"1px solid rgba(255,255,255,0.07)", marginBottom:16, overflowX:"auto", width:"fit-content" }}>
-              {SOURCES.map(s=>{
-                const src = s;
-                return <button key={s.id} onClick={()=>setActiveSource(s.id)} style={{ fontSize:11, fontWeight:700, letterSpacing:1, textTransform:"uppercase", padding:"7px 16px", cursor:"pointer", borderRadius:6, background:activeSource===s.id?s.bg:"none", color:activeSource===s.id?s.color:"#555", border:activeSource===s.id?`1px solid ${s.color}44`:"1px solid transparent", whiteSpace:"nowrap", display:"flex", alignItems:"center", gap:5 }}>
-                  {srcDone[s.id]&&<span style={{ color:"#00e5a0" }}>✓</span>}{s.label}
-                </button>;
-              })}
-            </div>
+            {batchError && <div style={{ marginBottom:16, padding:"10px 14px", background:"rgba(255,77,109,0.08)", border:"1px solid rgba(255,77,109,0.2)", borderRadius:8, fontSize:11, color:"#ff4d6d" }}>⚠ {batchError}</div>}
 
-            {/* Active source panel */}
-            {SOURCES.filter(s=>s.id===activeSource).map(src=>(
-              <div key={src.id}>
-                <div style={{ ...S.card, border:`1px solid ${src.color}22`, marginBottom:14 }}>
-                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:12 }}>
-                    <div>
-                      <div style={{ fontSize:9, letterSpacing:2, textTransform:"uppercase", color:src.color, fontWeight:700, marginBottom:4 }}>{src.label}</div>
-                      <div style={{ fontSize:11, color:"#555" }}>Expected columns: <span style={{ color:"#777" }}>{src.desc}</span></div>
-                    </div>
-                    {srcDone[activeSource]&&<span style={{ fontSize:10, fontWeight:700, color:"#00e5a0", background:"rgba(0,229,160,0.1)", padding:"3px 10px", borderRadius:20 }}>✓ Imported</span>}
+            {/* Detected files */}
+            {batchFiles.length>0 && (
+              <div style={{ ...S.card, marginBottom:16 }}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+                  <div>
+                    <div style={{ fontSize:9, letterSpacing:2, textTransform:"uppercase", color:"#444", fontWeight:700, marginBottom:3 }}>{batchFiles.length} file{batchFiles.length!==1?"s":""} detected</div>
+                    {reconResult && <div style={{ fontSize:11, color:"#00e5a0" }}>✓ {reconResult.matchCount} of {reconResult.total} TikTok orders matched to Shopify orders</div>}
                   </div>
-                  <textarea
-                    value={srcText[activeSource]||""}
-                    onChange={e=>{ setSrcText(t=>({...t,[activeSource]:e.target.value})); setSrcError(er=>({...er,[activeSource]:""})); setSrcPreview(p=>({...p,[activeSource]:null})); setSrcDone(d=>({...d,[activeSource]:false})); }}
-                    placeholder={src.placeholder}
-                    style={{ width:"100%", height:130, background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.1)", borderRadius:8, color:"#e8e8f0", fontFamily:"monospace", fontSize:11, padding:12, resize:"vertical", outline:"none", lineHeight:1.6 }}
-                  />
-                  <div style={{ display:"flex", gap:10, marginTop:10, alignItems:"center" }}>
-                    <button onClick={()=>previewSource(activeSource)} style={{ fontSize:12, fontWeight:700, padding:"8px 20px", borderRadius:7, background:src.bg, color:src.color, border:`1px solid ${src.color}44`, cursor:"pointer" }}>Preview →</button>
-                    <input ref={multiFileRef} type="file" accept=".csv,.tsv,.txt" onChange={e=>{ const f=e.target.files[0]; if(!f)return; const r=new FileReader(); r.onload=ev=>setSrcText(t=>({...t,[activeSource]:ev.target.result})); r.readAsText(f); }} style={{ display:"none" }}/>
-                    <button onClick={()=>multiFileRef.current.click()} style={{ fontSize:11, padding:"7px 14px", borderRadius:7, background:"rgba(255,255,255,0.04)", color:"#888", border:"1px solid rgba(255,255,255,0.08)", cursor:"pointer" }}>Upload file</button>
-                    {(srcText[activeSource]||"")&&<button onClick={()=>{ setSrcText(t=>({...t,[activeSource]:""})); setSrcPreview(p=>({...p,[activeSource]:null})); setSrcError(e=>({...e,[activeSource]:""})); }} style={{ fontSize:11, color:"#ff4d6d", background:"transparent", border:"none", cursor:"pointer" }}>✕ Clear</button>}
+                  <div style={{ display:"flex", gap:8 }}>
+                    <button onClick={()=>{ setBatchFiles([]); setReconResult(null); setBatchDone(false); }} style={{ fontSize:11, padding:"6px 12px", borderRadius:6, cursor:"pointer", background:"transparent", color:"#ff4d6d", border:"1px solid rgba(255,77,109,0.2)" }}>✕ Clear</button>
+                    <button onClick={commitAllBatch} style={{ fontSize:12, fontWeight:700, padding:"8px 22px", borderRadius:7, background:"#00e5a0", color:"#000", border:"none", cursor:"pointer" }}>✓ Import All</button>
                   </div>
-                  {srcError[activeSource]&&<div style={{ marginTop:10, padding:"8px 12px", background:"rgba(255,77,109,0.08)", border:"1px solid rgba(255,77,109,0.2)", borderRadius:6, fontSize:11, color:"#ff4d6d" }}>⚠ {srcError[activeSource]}</div>}
                 </div>
 
-                {/* Preview */}
-                {srcPreview[activeSource]&&(
-                  <div style={{ ...S.card, marginBottom:16, border:`1px solid ${src.color}33` }}>
-                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
-                      <div>
-                        <div style={{ fontSize:9, letterSpacing:2, textTransform:"uppercase", color:src.color, fontWeight:700, marginBottom:3 }}>Preview — {srcPreview[activeSource].rows.length} rows</div>
-                        <div style={{ fontSize:11, color:"#555" }}>
-                          {activeSource==="ads"?"Replaces current ad data.":activeSource==="inventory"?"Updates units on hand for matched products.":activeSource==="competitors"?"Updates existing competitors by name; adds new ones.":"Existing products updated; new ones added. Tags & status preserved."}
-                        </div>
+                {batchFiles.map((item,idx)=>{
+                  const meta = FILE_TYPE_META[item.result.type||"unknown"]||FILE_TYPE_META.unknown;
+                  const hasError = !!item.result.error;
+                  return (
+                    <div key={idx} style={{ display:"flex", alignItems:"center", gap:14, padding:"12px 0", borderBottom:idx<batchFiles.length-1?"1px solid rgba(255,255,255,0.05)":"none" }}>
+                      {/* Status dot */}
+                      <div style={{ width:10, height:10, borderRadius:"50%", background:item.committed?"#00e5a0":hasError?"#ff4d6d":meta.color, flexShrink:0 }}/>
+                      {/* File info */}
+                      <div style={{ flex:1, minWidth:0 }}>
+                        <div style={{ fontSize:12, fontWeight:700, color:"#e8e8f0", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{item.name}</div>
+                        {hasError
+                          ? <div style={{ fontSize:11, color:"#ff4d6d", marginTop:2 }}>⚠ {item.result.error}</div>
+                          : <div style={{ fontSize:11, color:"#555", marginTop:2, display:"flex", gap:12 }}>
+                              <span style={{ color:meta.color, fontWeight:700 }}>{meta.label}</span>
+                              <span>→ {meta.dest}</span>
+                              <span>{item.result.count} rows</span>
+                              {item.result.type==="shopify_orders"&&reconResult&&<span style={{ color:"#00e5a0" }}>✓ Reconciled with TikTok orders</span>}
+                            </div>
+                        }
                       </div>
-                      <button onClick={()=>commitSource(activeSource)} style={{ fontSize:12, fontWeight:700, padding:"9px 24px", borderRadius:7, background:src.color, color:"#000", border:"none", cursor:"pointer" }}>✓ Confirm Import</button>
+                      {/* Action */}
+                      {!hasError && (
+                        item.committed
+                          ? <span style={{ fontSize:10, fontWeight:700, color:"#00e5a0" }}>✓ Imported</span>
+                          : <button onClick={()=>commitBatchFile(idx)} style={{ fontSize:10, fontWeight:700, padding:"4px 12px", borderRadius:6, cursor:"pointer", background:meta.bg, color:meta.color, border:`1px solid ${meta.color}44`, whiteSpace:"nowrap" }}>Import →</button>
+                      )}
                     </div>
+                  );
+                })}
 
-                    {/* Column map badges */}
-                    {srcPreview[activeSource].map&&(
-                      <div style={{ display:"flex", flexWrap:"wrap", gap:6, marginBottom:12 }}>
-                        {Object.entries(srcPreview[activeSource].map).map(([field,colIdx])=>(
-                          <span key={field} style={{ fontSize:9, padding:"3px 8px", borderRadius:5, background:src.bg, color:src.color, border:`1px solid ${src.color}33` }}>
-                            {IMPORT_FIELDS.find(f=>f.field===field)?.label||field} ← "{srcPreview[activeSource].headers[colIdx]}"
-                          </span>
-                        ))}
-                      </div>
-                    )}
-
-                    {/* Preview rows */}
-                    <div style={{ overflowX:"auto" }}>
-                      <table style={{ width:"100%", borderCollapse:"collapse", fontSize:11 }}>
-                        <thead><tr>
-                          {activeSource==="performance"&&["Product","Units","Revenue","ROAS","Margin","VCR","Ad Spend"].map(h=><th key={h} style={{ ...S.th, fontSize:8 }}>{h}</th>)}
-                          {activeSource==="pricing"    &&["Product","Retail","Sale Price","COGS"].map(h=><th key={h} style={{ ...S.th, fontSize:8 }}>{h}</th>)}
-                          {activeSource==="inventory"  &&["Product","Units on Hand","Incoming"].map(h=><th key={h} style={{ ...S.th, fontSize:8 }}>{h}</th>)}
-                          {activeSource==="ads"        &&["Ad Name","Type","Spend","Revenue","ROAS","CTR","CVR"].map(h=><th key={h} style={{ ...S.th, fontSize:8 }}>{h}</th>)}
-                          {activeSource==="competitors"&&["Brand","Niche","Followers","GMV","Running Ads"].map(h=><th key={h} style={{ ...S.th, fontSize:8 }}>{h}</th>)}
-                        </tr></thead>
-                        <tbody>
-                          {srcPreview[activeSource].rows.slice(0,8).map((row,i)=>{
-                            const isUpdate=(activeSource==="performance"||activeSource==="pricing")&&catalog.find(p=>p.name?.toLowerCase()===row.name?.toLowerCase());
-                            const isCompUpdate=activeSource==="competitors"&&competitors.find(c=>c.brand?.toLowerCase()===row.brand?.toLowerCase());
-                            return <tr key={i} style={{ background:(isUpdate||isCompUpdate)?"rgba(245,197,24,0.03)":"transparent" }}>
-                              {activeSource==="performance"&&<>
-                                <td style={S.td}><span style={{ fontWeight:700 }}>{row.name}</span>{isUpdate?<span style={{ fontSize:9,color:"#f5c518",marginLeft:5,fontWeight:700 }}>UPDATE</span>:<span style={{ fontSize:9,color:"#00e5a0",marginLeft:5,fontWeight:700 }}>NEW</span>}</td>
-                                <td style={S.td}>{row.units||"—"}</td>
-                                <td style={S.td}><span style={{ fontWeight:700 }}>{row.revenue>0?fmt(row.revenue):"—"}</span></td>
-                                <td style={S.td}><span style={{ color:row.roas>=2.5?"#00e5a0":row.roas>0?"#f5c518":"#444" }}>{row.roas>0?row.roas+"x":"—"}</span></td>
-                                <td style={S.td}>{row.margin>0?row.margin+"%":"—"}</td>
-                                <td style={S.td}>{row.vcr>0?row.vcr+"%":"—"}</td>
-                                <td style={S.td}><span style={{ color:"#ff6b35" }}>{row.adSpend>0?fmt(row.adSpend):"—"}</span></td>
-                              </>}
-                              {activeSource==="pricing"&&<>
-                                <td style={S.td}><span style={{ fontWeight:700 }}>{row.name}</span>{isUpdate&&<span style={{ fontSize:9,color:"#f5c518",marginLeft:5,fontWeight:700 }}>UPDATE</span>}</td>
-                                <td style={S.td}>{row.retailPrice>0?"$"+row.retailPrice.toFixed(2):"—"}</td>
-                                <td style={S.td}><span style={{ color:"#00e5a0" }}>{row.discountedPrice>0?"$"+row.discountedPrice.toFixed(2):"—"}</span></td>
-                                <td style={S.td}>{row.cogs>0?"$"+row.cogs.toFixed(2):"—"}</td>
-                              </>}
-                              {activeSource==="inventory"&&<>
-                                <td style={S.td}><span style={{ fontWeight:700 }}>{row.name}</span></td>
-                                <td style={S.td}><span style={{ fontWeight:700, color:row.units<30?"#ff4d6d":"#00e5a0" }}>{row.units}</span></td>
-                                <td style={S.td}><span style={{ color:"#aaa" }}>{row.incoming||"—"}</span></td>
-                              </>}
-                              {activeSource==="ads"&&<>
-                                <td style={{ ...S.td, maxWidth:180 }}><span style={{ fontWeight:600 }}>{row.name}</span></td>
-                                <td style={S.td}><span style={{ fontSize:9,fontWeight:700,padding:"2px 6px",borderRadius:20,background:AD_TYPES[row.type]?.bg,color:AD_TYPES[row.type]?.color }}>{AD_TYPES[row.type]?.label||row.type}</span></td>
-                                <td style={S.td}><span style={{ fontWeight:700 }}>${row.spend}</span></td>
-                                <td style={S.td}><span style={{ color:"#00e5a0" }}>${(row.revenue/1000).toFixed(1)}k</span></td>
-                                <td style={S.td}><span style={{ color:row.roas>=3?"#00e5a0":row.roas>=2?"#f5c518":"#ff4d6d",fontWeight:700 }}>{row.roas}x</span></td>
-                                <td style={S.td}>{row.ctr>0?row.ctr+"%":"—"}</td>
-                                <td style={S.td}>{row.cvr>0?row.cvr+"%":"—"}</td>
-                              </>}
-                              {activeSource==="competitors"&&<>
-                                <td style={S.td}><span style={{ fontWeight:700 }}>{row.brand}</span>{isCompUpdate&&<span style={{ fontSize:9,color:"#f5c518",marginLeft:5,fontWeight:700 }}>UPDATE</span>}</td>
-                                <td style={S.td}>{row.niche||"—"}</td>
-                                <td style={S.td}>{row.followers>0?(row.followers/1000).toFixed(0)+"K":"—"}</td>
-                                <td style={S.td}>{row.monthlyGMV>0?"$"+(row.monthlyGMV/1000).toFixed(0)+"K":"—"}</td>
-                                <td style={S.td}>{row.running_ads?<span style={{ color:"#ff6b35",fontWeight:700 }}>Yes</span>:<span style={{ color:"#444" }}>No</span>}</td>
-                              </>}
-                            </tr>;
-                          })}
-                        </tbody>
-                      </table>
-                      {srcPreview[activeSource].rows.length>8&&<div style={{ fontSize:10,color:"#555",padding:"8px 0" }}>+{srcPreview[activeSource].rows.length-8} more rows</div>}
-                    </div>
-                  </div>
-                )}
+                {batchDone && <div style={{ marginTop:14, padding:"10px 14px", background:"rgba(0,229,160,0.08)", border:"1px solid rgba(0,229,160,0.2)", borderRadius:8, fontSize:11, color:"#00e5a0" }}>✓ All files imported successfully. Dashboard updated.</div>}
               </div>
-            ))}
+            )}
+
+            {/* Reconciliation detail */}
+            {reconResult && (
+              <div style={{ ...S.card, marginBottom:16, border:"1px solid rgba(0,229,160,0.15)", background:"rgba(0,229,160,0.02)" }}>
+                <div style={{ fontSize:9, letterSpacing:2, textTransform:"uppercase", color:"#00e5a0", fontWeight:700, marginBottom:14 }}>Order Reconciliation — TikTok × Shopify</div>
+                <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:12, marginBottom:16 }}>
+                  {[
+                    ["TikTok Orders",  reconResult.total,                                          "#fff"    ],
+                    ["Matched",        reconResult.matchCount,                                     "#00e5a0" ],
+                    ["Unmatched",      reconResult.total-reconResult.matchCount,                   reconResult.total-reconResult.matchCount>0?"#f5c518":"#555"],
+                    ["Match Rate",     r2(reconResult.matchCount/reconResult.total*100)+"%",       "#00e5a0" ],
+                  ].map(([k,v,c])=>(
+                    <div key={k} style={{ background:"rgba(255,255,255,0.03)", borderRadius:8, padding:"10px 12px", textAlign:"center" }}>
+                      <div style={{ fontSize:9, color:"#444", letterSpacing:1, textTransform:"uppercase", marginBottom:6 }}>{k}</div>
+                      <div style={{ fontSize:20, fontWeight:700, color:c }}>{v}</div>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ overflowX:"auto", maxHeight:240, overflowY:"auto" }}>
+                  <table style={{ width:"100%", borderCollapse:"collapse", fontSize:11 }}>
+                    <thead><tr>{["TikTok Order ID","Shopify Order ID","Product","Sale Price","Platform Disc","Seller Disc","Order Total","Status","Matched"].map(h=><th key={h} style={{ ...S.th, fontSize:8, whiteSpace:"nowrap" }}>{h}</th>)}</tr></thead>
+                    <tbody>
+                      {reconResult.rows.slice(0,50).map((row,i)=>(
+                        <tr key={i} style={{ background:row.matched?"transparent":"rgba(245,197,24,0.03)" }}>
+                          <td style={{ ...S.td, fontSize:10, color:"#555" }}>{row.tiktokOrderId?.slice(-8)}</td>
+                          <td style={{ ...S.td, fontSize:10, color:row.shopifyOrderId?"#00e5a0":"#444" }}>{row.shopifyOrderId||"—"}</td>
+                          <td style={{ ...S.td, maxWidth:160 }}><span style={{ fontSize:11, fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", display:"block" }}>{row.productName}</span></td>
+                          <td style={S.td}>${(row.salePrice||0).toFixed(2)}</td>
+                          <td style={S.td}><span style={{ color:"#ff4d6d" }}>{row.platformDisc?"-$"+Math.abs(row.platformDisc).toFixed(2):"—"}</span></td>
+                          <td style={S.td}><span style={{ color:"#f5c518" }}>{row.sellerDisc?"-$"+Math.abs(row.sellerDisc).toFixed(2):"—"}</span></td>
+                          <td style={S.td}><span style={{ fontWeight:700 }}>${(row.orderAmount||0).toFixed(2)}</span></td>
+                          <td style={S.td}><span style={{ fontSize:9, color:row.status?.toLowerCase().includes("deliver")?"#00e5a0":"#aaa" }}>{row.status}</span></td>
+                          <td style={S.td}>{row.matched?<span style={{ color:"#00e5a0", fontWeight:700 }}>✓</span>:<span style={{ color:"#f5c518" }}>—</span>}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {reconResult.rows.length>50&&<div style={{ fontSize:10,color:"#555",padding:"8px 0",textAlign:"center" }}>Showing 50 of {reconResult.rows.length} orders</div>}
+                </div>
+              </div>
+            )}
+
+            {/* File type reference */}
+            <div style={{ ...S.card, background:"rgba(255,255,255,0.01)", border:"1px solid rgba(255,255,255,0.05)" }}>
+              <div style={{ fontSize:9, letterSpacing:2, textTransform:"uppercase", color:"#444", fontWeight:700, marginBottom:14 }}>Supported File Types — Auto-Detected</div>
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(2,1fr)", gap:10 }}>
+                {[
+                  { label:"TikTok Order Export",      cols:"Order ID, Order Status, SKU Subtotal, Platform Discount, Order Amount",              dest:"Profitability & order reconciliation",  color:"#00e5a0" },
+                  { label:"Shopify Order Export",      cols:"Lineitem name, Financial Status, Billing Name, Tags (TikTokOrderID)",                dest:"Reconciled with TikTok orders",          color:"#ff6b35" },
+                  { label:"Ads — Creative Data",       cols:"Campaign name, Creative type, Video title, Cost, Gross revenue, ROI, VCR",           dest:"Ads tab — creative performance",         color:"#c77dff" },
+                  { label:"Ads — Campaign Report",     cols:"Campaign name, Primary status, Cost, CPM, CPC, Impressions, Clicks, CVR",            dest:"Ads tab — campaign performance",         color:"#c77dff" },
+                  { label:"Ads — GMV Max",             cols:"Campaign ID, Campaign name, Cost, Net Cost, SKU orders, Gross revenue, ROI",          dest:"Ads tab — GMV Max",                      color:"#c77dff" },
+                  { label:"Inventory",                 cols:"Product name, Units on hand, Incoming",                                              dest:"Inventory tab",                          color:"#f5c518" },
+                  { label:"Sales & Performance",       cols:"Product name, Revenue, Units sold, ROAS, Margin %, VCR %",                           dest:"Products & Overview tabs",               color:"#00e5a0" },
+                ].map((row,i)=>(
+                  <div key={i} style={{ padding:"10px 12px", background:"rgba(255,255,255,0.02)", borderRadius:8, borderLeft:`3px solid ${row.color}` }}>
+                    <div style={{ fontSize:11, fontWeight:700, color:row.color, marginBottom:4 }}>{row.label}</div>
+                    <div style={{ fontSize:10, color:"#555", marginBottom:4, lineHeight:1.5 }}>{row.cols}</div>
+                    <div style={{ fontSize:10, color:"#444" }}>→ {row.dest}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
 
             {/* Import history */}
             {importHistory.length>0&&(
-              <div style={S.card}>
+              <div style={{ ...S.card, marginTop:16 }}>
                 <div style={{ fontSize:9, letterSpacing:2, textTransform:"uppercase", color:"#444", fontWeight:700, marginBottom:12 }}>Import History</div>
                 {importHistory.map((h,i)=>(
                   <div key={i} style={{ display:"flex", justifyContent:"space-between", padding:"7px 0", borderBottom:i<importHistory.length-1?"1px solid rgba(255,255,255,0.04)":"none", fontSize:11 }}>
                     <span style={{ color:"#888" }}>{h.date}</span>
-                    <span style={{ color:"#555" }}>{h.source||"Catalog"}</span>
+                    <span style={{ color:"#555", fontSize:10 }}>{h.source||"Import"}</span>
                     <span style={{ color:"#00e5a0", fontWeight:700 }}>{h.rowCount} rows</span>
                   </div>
                 ))}
@@ -2002,6 +2587,10 @@ function BrandDashboard({ brandId, brandName, brandColor, onBack }) {
             )}
           </div>
         )}
+
+
+
+
 
         {/* ── OVERVIEW ── */}
         {tab==="overview" && (
