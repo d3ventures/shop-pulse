@@ -1909,6 +1909,27 @@ function BrandDashboard({ brandId, brandName, brandColor, onBack }) {
   const setAffExpandedCreator = setAffExpandedId;
   const allVideos        = allAffVideos;
 
+  // ── Euka Affiliate state ───────────────────────────────────────────────────
+  const EUKA_STORES = {
+    heritage: { id:"4bc04f0b-f9f3-4fae-846f-74d76b73dbeb", name:"Heritage Store",  color:"#00e5a0" },
+    solaray:  { id:"b10701a8-2cdb-4263-9ed1-2f1493524061", name:"Solaray",          color:"#f5c518" },
+    lifeflo:  { id:"1429e8ca-1df5-4b46-8c02-70f28aec8c9b", name:"Life-Flo",         color:"#c77dff" },
+    kal:      { id:"66a4cd36-f19b-40a1-aec3-fcc1001e6faa", name:"Kal Vitamins",     color:"#ff6b35" },
+    zhou:     { id:"421062a7-1dca-459c-bd15-904a9d6b34f4", name:"Zhou Nutrition",   color:"#ff4d6d" },
+  };
+
+  const [eukaData,       setEukaData]       = useState({});   // keyed by storeId
+  const [eukaLoading,    setEukaLoading]    = useState({});
+  const [eukaError,      setEukaError]      = useState({});
+  const [eukaView,       setEukaView]       = useState("overview");  // overview|creators|videos|campaigns
+  const [eukaSortBy,     setEukaSortBy]     = useState("gmv");
+  const [eukaVideoFilter,setEukaVideoFilter]= useState("all");
+
+  // Get store id from the current brand context (brandId prop maps to EUKA_STORES)
+  const currentEukaStore = Object.values(EUKA_STORES).find(s=>
+    brandId ? s.id && brandName && s.name.toLowerCase().includes(brandName.toLowerCase().split(" ")[0].toLowerCase()) : false
+  ) || EUKA_STORES.heritage;
+
   const TABS = ["sop","snapshot","data import","overview","products","channels","ads","weekly strategy","goals & projections","profitability","inventory","competitors","launches","catalog"];
 
   return (
@@ -2695,7 +2716,12 @@ function BrandDashboard({ brandId, brandName, brandColor, onBack }) {
               {[
                 { label:"Organic Videos", color:"#00e5a0", rows:[["Revenue",fmt(d.channels.organic.revenue)],["Impressions",(d.channels.organic.impressions/1000).toFixed(0)+"K"],["VCR",d.channels.organic.vcr+"%"],["Completion",d.channels.organic.completionRate+"%"]] },
                 { label:"Paid Ads",       color:"#ff6b35", rows:[["Revenue",fmt(d.channels.paid.revenue)],["Ad Spend",fmt(d.channels.paid.spend)],["ROAS",d.channels.paid.roas+"x"],["CTR",d.channels.paid.ctr+"%"]] },
-                { label:"Affiliate",      color:"#c77dff", rows:[["Revenue",fmtFull(affTotalRevenue)],["Total Views",(affTotalViews/1000).toFixed(0)+"K"],["Creators",affiliates.length],["Avg Commission",affAvgCommission+"%"]] },
+                { label:"Affiliate",      color:"#c77dff", rows:[
+                  ["GMV", eukaData[currentEukaStore.id]?.summary?.totalGmv ? "$"+(eukaData[currentEukaStore.id].summary.totalGmv/1000).toFixed(1)+"k" : "—"],
+                  ["Creators w/ GMV", eukaData[currentEukaStore.id]?.summary?.creatorsWithGmv||"—"],
+                  ["Total Videos",    eukaData[currentEukaStore.id]?.summary?.totalVideos||"—"],
+                  ["Video Hit Rate",  eukaData[currentEukaStore.id]?.summary?.videoHitRate ? eukaData[currentEukaStore.id].summary.videoHitRate+"%" : "—"],
+                ]},
               ].map((ch,i)=>(
                 <div key={i} style={S.card}>
                   <div style={{ fontSize:9, fontWeight:700, letterSpacing:2, textTransform:"uppercase", color:ch.color, marginBottom:14 }}>{ch.label}</div>
@@ -2704,248 +2730,300 @@ function BrandDashboard({ brandId, brandName, brandColor, onBack }) {
               ))}
             </div>
 
-            {/* ── AFFILIATE DEEP DIVE ── */}
-            <div style={{ marginTop:8, marginBottom:16, display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:10 }}>
-              <div>
-                <div style={{ fontSize:9, letterSpacing:2, textTransform:"uppercase", color:"#c77dff", fontWeight:700, marginBottom:4 }}>Affiliate Deep Dive</div>
-                <div style={{ fontSize:11, color:"#555" }}>{affiliates.length} active creators · {allVideos.length} tracked videos · ${(affTotalRevenue/1000).toFixed(1)}k attributed revenue</div>
-              </div>
-              <div style={{ display:"flex", gap:8, alignItems:"center" }}>
-                {/* View toggle */}
-                <div style={{ display:"flex", gap:0, background:"rgba(255,255,255,0.03)", borderRadius:7, padding:3, border:"1px solid rgba(255,255,255,0.07)" }}>
-                  {[{id:"overview",label:"Overview"},{id:"creators",label:"Creators"},{id:"videos",label:"Videos"}].map(v=>(
-                    <button key={v.id} onClick={()=>setAffView(v.id)} style={{ fontSize:11, fontWeight:700, letterSpacing:1, textTransform:"uppercase", padding:"6px 13px", cursor:"pointer", borderRadius:5, background:affView===v.id?"rgba(199,125,255,0.12)":"none", color:affView===v.id?"#c77dff":"#555", border:affView===v.id?"1px solid rgba(199,125,255,0.3)":"1px solid transparent", whiteSpace:"nowrap" }}>{v.label}</button>
-                  ))}
+            {/* ── EUKA AFFILIATE INTELLIGENCE ── */}
+            <div style={{ marginTop:20 }}>
+              {/* Header + controls */}
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16, flexWrap:"wrap", gap:10 }}>
+                <div>
+                  <div style={{ fontSize:9, letterSpacing:2, textTransform:"uppercase", color:"#c77dff", fontWeight:700, marginBottom:4 }}>Affiliate Intelligence — powered by Euka</div>
+                  <div style={{ fontSize:11, color:"#555" }}>
+                    {eukaData[currentEukaStore.id]
+                      ? `${eukaData[currentEukaStore.id].summary?.totalCreators?.toLocaleString()||0} total creators · ${eukaData[currentEukaStore.id].summary?.creatorsWithGmv?.toLocaleString()||0} with GMV · $${((eukaData[currentEukaStore.id].summary?.totalGmv||0)/1000).toFixed(1)}k all-time`
+                      : "Click Refresh to load live data from Euka"}
+                  </div>
                 </div>
-                {/* Paste button */}
-                <button onClick={()=>setAffPasteOpen(o=>!o)} style={{ fontSize:11, padding:"6px 12px", borderRadius:6, cursor:"pointer", background:"rgba(199,125,255,0.08)", color:"#c77dff", border:"1px solid rgba(199,125,255,0.2)" }}>
-                  {affPasteOpen?"▲ Collapse":"▼ Paste Data"}
-                </button>
+                <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+                  {/* View toggle */}
+                  <div style={{ display:"flex", gap:0, background:"rgba(255,255,255,0.03)", borderRadius:7, padding:3, border:"1px solid rgba(255,255,255,0.07)" }}>
+                    {[{id:"overview",label:"Overview"},{id:"creators",label:"Creators"},{id:"videos",label:"Videos"},{id:"campaigns",label:"Campaigns"}].map(v=>(
+                      <button key={v.id} onClick={()=>setEukaView(v.id)} style={{ fontSize:11, fontWeight:700, letterSpacing:1, textTransform:"uppercase", padding:"6px 12px", cursor:"pointer", borderRadius:5, background:eukaView===v.id?"rgba(199,125,255,0.12)":"none", color:eukaView===v.id?"#c77dff":"#555", border:eukaView===v.id?"1px solid rgba(199,125,255,0.3)":"1px solid transparent", whiteSpace:"nowrap" }}>{v.label}</button>
+                    ))}
+                  </div>
+                  {/* Refresh button */}
+                  <button
+                    onClick={async ()=>{
+                      const storeId = currentEukaStore.id;
+                      setEukaLoading(l=>({...l,[storeId]:true}));
+                      setEukaError(e=>({...e,[storeId]:""}));
+                      try {
+                        const response = await fetch("https://api.anthropic.com/v1/messages", {
+                          method:"POST",
+                          headers:{ "Content-Type":"application/json" },
+                          body: JSON.stringify({
+                            model:"claude-sonnet-4-20250514",
+                            max_tokens:1000,
+                            mcp_servers:[{ type:"url", url:"https://app.euka.ai/api/mcp", name:"euka-mcp" }],
+                            messages:[{ role:"user", content:`For Euka store ID ${storeId}, query this data and return ONLY a JSON object (no markdown, no preamble) with this exact structure:
+{
+  "summary": { "totalCreators": number, "creatorsWithGmv": number, "totalGmv": number, "totalVideos": number, "videoHitRate": number, "samplesSent": number, "samplesShipped": number, "shipRate": number },
+  "topCreators": [{ "handle": string, "followers": number, "gmv": number, "videos": number, "hitRate": number, "avgRevPerVideo": number }],
+  "topVideos": [{ "handle": string, "description": string, "product": string, "views": number, "revenue": number, "itemsSold": number, "date": string }],
+  "campaigns": [{ "name": string, "requests": number, "shipped": number, "videos": number, "revenue": number }],
+  "monthlyTrend": [{ "month": string, "videos": number, "gmv": number, "creators": number }]
+}
+Limit arrays to top 25 rows each. Use null for missing values. Return only the JSON.` }]
+                          })
+                        });
+                        const data = await response.json();
+                        const text = data.content?.map(c=>c.text||"").join("") || "";
+                        const clean = text.replace(/```json|```/g,"").trim();
+                        const parsed = JSON.parse(clean);
+                        setEukaData(prev=>({...prev,[storeId]:parsed}));
+                      } catch(err) {
+                        setEukaError(e=>({...e,[storeId]:"Failed to load Euka data. Check your connection and try again."}));
+                      } finally {
+                        setEukaLoading(l=>({...l,[storeId]:false}));
+                      }
+                    }}
+                    style={{ fontSize:11, fontWeight:700, padding:"7px 16px", borderRadius:7, background:"rgba(199,125,255,0.1)", color:"#c77dff", border:"1px solid rgba(199,125,255,0.25)", cursor:"pointer", display:"flex", alignItems:"center", gap:6 }}>
+                    {eukaLoading[currentEukaStore.id] ? "⟳ Loading..." : "⟳ Refresh"}
+                  </button>
+                </div>
               </div>
-            </div>
 
-            {/* Paste panel */}
-            {affPasteOpen && (
-              <div style={{ ...S.card, marginBottom:16, border:"1px solid rgba(199,125,255,0.2)" }}>
-                <div style={{ fontSize:9, letterSpacing:2, textTransform:"uppercase", color:"#c77dff", fontWeight:700, marginBottom:8 }}>Paste Affiliate / Creator Data</div>
-                <div style={{ fontSize:11, color:"#555", marginBottom:10, lineHeight:1.6 }}>
-                  Columns: <strong style={{ color:"#e8e8f0" }}>Handle, Tier, Followers, Revenue, Views, Orders, Commission %</strong>. Headers auto-detected. Include the @ in handles or the importer adds it automatically.
-                </div>
-                <textarea value={affPasteText} onChange={e=>{ setAffPasteText(e.target.value); setAffPasteError(""); }}
-                  placeholder={"Handle\tTier\tFollowers\tRevenue\tViews\tOrders\tCommission\n@glowwithsara\tmicro\t48000\t4820\t142000\t138\t20\n@beautybykim\tmid\t184000\t6290\t310000\t180\t15"}
-                  style={{ width:"100%", height:120, background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.1)", borderRadius:8, color:"#e8e8f0", fontFamily:"monospace", fontSize:11, padding:10, resize:"vertical", outline:"none", lineHeight:1.6 }}/>
-                <div style={{ display:"flex", gap:10, marginTop:10, alignItems:"center" }}>
-                  <button onClick={handleAffPaste} style={{ fontSize:12, fontWeight:700, padding:"8px 18px", borderRadius:7, background:"rgba(199,125,255,0.1)", color:"#c77dff", border:"1px solid rgba(199,125,255,0.3)", cursor:"pointer" }}>Import →</button>
-                  <input ref={affFileRef} type="file" accept=".csv,.tsv,.txt" onChange={e=>{ const f=e.target.files[0]; if(!f)return; const r=new FileReader(); r.onload=ev=>setAffPasteText(ev.target.result); r.readAsText(f); }} style={{ display:"none" }}/>
-                  <button onClick={()=>affFileRef.current.click()} style={{ fontSize:11, padding:"6px 12px", borderRadius:7, background:"rgba(255,255,255,0.04)", color:"#888", border:"1px solid rgba(255,255,255,0.08)", cursor:"pointer" }}>Upload file</button>
-                  {affPasteText && <button onClick={()=>setAffPasteText("")} style={{ fontSize:11, color:"#ff4d6d", background:"transparent", border:"none", cursor:"pointer" }}>✕ Clear</button>}
-                </div>
-                {affPasteError && <div style={{ marginTop:8, fontSize:11, color:"#ff4d6d", padding:"6px 10px", background:"rgba(255,77,109,0.08)", borderRadius:6 }}>⚠ {affPasteError}</div>}
-                {affPasteOk    && <div style={{ marginTop:8, fontSize:11, color:"#00e5a0" }}>✓ Affiliate data updated.</div>}
-              </div>
-            )}
-
-            {/* Sort + product filter bar */}
-            <div style={{ display:"flex", gap:12, alignItems:"center", marginBottom:14, flexWrap:"wrap" }}>
-              <div style={{ display:"flex", alignItems:"center", gap:6 }}>
-                <span style={{ fontSize:10, color:"#555" }}>Sort by:</span>
-                {["revenue","views","orders","vcr"].map(s=>(
-                  <button key={s} onClick={()=>setAffSortBy(s)} style={{ fontSize:10, fontWeight:700, padding:"3px 10px", borderRadius:20, cursor:"pointer", background:affSortBy===s?"rgba(199,125,255,0.12)":"transparent", color:affSortBy===s?"#c77dff":"#555", border:`1px solid ${affSortBy===s?"rgba(199,125,255,0.3)":"rgba(255,255,255,0.08)"}`, textTransform:"capitalize" }}>{s}</button>
-                ))}
-              </div>
-              {affView==="videos" && (
-                <div style={{ display:"flex", alignItems:"center", gap:6 }}>
-                  <span style={{ fontSize:10, color:"#555" }}>Product:</span>
-                  <button onClick={()=>setAffProductFilter("all")} style={{ fontSize:10, fontWeight:700, padding:"3px 10px", borderRadius:20, cursor:"pointer", background:affProductFilter==="all"?"rgba(255,255,255,0.1)":"transparent", color:affProductFilter==="all"?"#e8e8f0":"#555", border:"1px solid rgba(255,255,255,0.1)" }}>All</button>
-                  {affProducts.map(p=>(
-                    <button key={p} onClick={()=>setAffProductFilter(p)} style={{ fontSize:10, fontWeight:700, padding:"3px 10px", borderRadius:20, cursor:"pointer", background:affProductFilter===p?"rgba(199,125,255,0.12)":"transparent", color:affProductFilter===p?"#c77dff":"#555", border:`1px solid ${affProductFilter===p?"rgba(199,125,255,0.3)":"rgba(255,255,255,0.08)"}`, maxWidth:120, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{p}</button>
-                  ))}
+              {/* Error */}
+              {eukaError[currentEukaStore.id] && (
+                <div style={{ padding:"10px 14px", background:"rgba(255,77,109,0.08)", border:"1px solid rgba(255,77,109,0.2)", borderRadius:8, fontSize:11, color:"#ff4d6d", marginBottom:16 }}>
+                  ⚠ {eukaError[currentEukaStore.id]}
                 </div>
               )}
-            </div>
 
-            {/* ── OVERVIEW VIEW ── */}
-            {affView==="overview" && (
-              <div>
-                {/* Top-line affiliate KPIs */}
-                <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:12, marginBottom:20 }}>
-                  {[
-                    ["Total Affiliate Revenue", fmtFull(affTotalRevenue), "#c77dff"],
-                    ["Total Orders",            affTotalOrders,            "#fff"],
-                    ["Total Views",             (affTotalViews/1000).toFixed(0)+"K", "#aaa"],
-                    ["Avg Commission",          affAvgCommission+"%",      "#f5c518"],
-                  ].map(([k,v,c])=>(
-                    <div key={k} style={{ ...S.card, textAlign:"center", padding:"14px 12px" }}>
-                      <div style={{ fontSize:9, color:"#444", letterSpacing:1.5, textTransform:"uppercase", fontWeight:700, marginBottom:8 }}>{k}</div>
-                      <div style={{ fontSize:22, fontWeight:700, color:c }}>{v}</div>
-                    </div>
-                  ))}
+              {/* Loading state */}
+              {eukaLoading[currentEukaStore.id] && (
+                <div style={{ ...S.card, textAlign:"center", padding:"48px 0", color:"#c77dff", fontSize:12 }}>
+                  <div style={{ fontSize:24, marginBottom:10 }}>⟳</div>
+                  Pulling live data from Euka for {currentEukaStore.name}…
                 </div>
+              )}
 
-                {/* Revenue by product from affiliates */}
-                <div style={{ ...S.card, marginBottom:16 }}>
-                  <div style={{ fontSize:9, letterSpacing:2, textTransform:"uppercase", color:"#444", fontWeight:700, marginBottom:16 }}>Affiliate Revenue by Product</div>
-                  {affProducts.map(prod=>{
-                    const prodVideos = allVideos.filter(v=>v.product===prod);
-                    const rev = prodVideos.reduce((s,v)=>s+v.revenue,0);
-                    const views = prodVideos.reduce((s,v)=>s+v.views,0);
-                    const orders = prodVideos.reduce((s,v)=>s+v.orders,0);
-                    const avgVcr = prodVideos.length ? r2(prodVideos.reduce((s,v)=>s+v.vcr,0)/prodVideos.length) : 0;
-                    const pct = affTotalRevenue>0 ? r2(rev/affTotalRevenue*100) : 0;
-                    const catProd = catalog.find(p=>p.name===prod);
-                    return (
-                      <div key={prod} style={{ display:"flex", alignItems:"center", gap:14, padding:"10px 0", borderBottom:"1px solid rgba(255,255,255,0.04)" }}>
-                        <div style={{ minWidth:160, fontSize:12, fontWeight:700 }}>{prod}</div>
-                        <div style={{ flex:1, height:6, background:"rgba(255,255,255,0.06)", borderRadius:3, overflow:"hidden" }}>
-                          <div style={{ height:"100%", width:pct+"%", background:"#c77dff", borderRadius:3 }}/>
+              {/* No data yet */}
+              {!eukaLoading[currentEukaStore.id] && !eukaData[currentEukaStore.id] && !eukaError[currentEukaStore.id] && (
+                <div style={{ ...S.card, textAlign:"center", padding:"48px 0" }}>
+                  <div style={{ fontSize:32, marginBottom:12 }}>⚡</div>
+                  <div style={{ fontSize:14, fontWeight:700, color:"#e8e8f0", marginBottom:8 }}>Live Euka Data</div>
+                  <div style={{ fontSize:12, color:"#555", marginBottom:20 }}>Click Refresh to pull real-time affiliate data for {currentEukaStore.name} from Euka — creators, videos, campaigns, and GMV.</div>
+                </div>
+              )}
+
+              {/* Data loaded */}
+              {!eukaLoading[currentEukaStore.id] && eukaData[currentEukaStore.id] && (()=>{
+                const ed = eukaData[currentEukaStore.id];
+                const summary   = ed.summary   || {};
+                const creators  = ed.topCreators|| [];
+                const videos    = ed.topVideos  || [];
+                const campaigns = ed.campaigns  || [];
+                const monthly   = ed.monthlyTrend|| [];
+
+                // ── OVERVIEW ──
+                if (eukaView==="overview") return (
+                  <div>
+                    {/* Funnel strip */}
+                    <div style={{ ...S.card, marginBottom:16, background:"rgba(199,125,255,0.03)", border:"1px solid rgba(199,125,255,0.15)" }}>
+                      <div style={{ fontSize:9, letterSpacing:2, textTransform:"uppercase", color:"#c77dff", fontWeight:700, marginBottom:16 }}>Creator Funnel — All Time</div>
+                      <div style={{ display:"flex", alignItems:"center", gap:0 }}>
+                        {[
+                          { label:"Total Creators",    val:(summary.totalCreators||0).toLocaleString(),         color:"#e8e8f0", pct:100 },
+                          { label:"Samples Sent",       val:(summary.samplesSent||0).toLocaleString(),           color:"#f5c518", pct:summary.totalCreators?r2((summary.samplesSent||0)/summary.totalCreators*100):0 },
+                          { label:"Samples Shipped",    val:(summary.samplesShipped||0).toLocaleString(),        color:"#ff6b35", pct:summary.samplesSent?r2((summary.samplesShipped||0)/summary.samplesSent*100):0 },
+                          { label:"Creators w/ Videos", val:(summary.totalCreators&&summary.totalVideos?Math.round(summary.totalVideos/2):0).toLocaleString(), color:"#c77dff", pct:summary.shipRate||0 },
+                          { label:"Creators w/ GMV",    val:(summary.creatorsWithGmv||0).toLocaleString(),       color:"#00e5a0", pct:summary.totalCreators?r2((summary.creatorsWithGmv||0)/summary.totalCreators*100):0 },
+                        ].map((s,i,arr)=>(
+                          <div key={i} style={{ flex:1, textAlign:"center", position:"relative" }}>
+                            <div style={{ fontSize:20, fontWeight:700, color:s.color, marginBottom:4 }}>{s.val}</div>
+                            <div style={{ fontSize:8, color:"#555", letterSpacing:1, textTransform:"uppercase", marginBottom:8 }}>{s.label}</div>
+                            <div style={{ height:4, background:"rgba(255,255,255,0.06)", borderRadius:2, margin:"0 8px" }}>
+                              <div style={{ height:"100%", width:s.pct+"%", background:s.color, borderRadius:2 }}/>
+                            </div>
+                            {i<arr.length-1&&<div style={{ position:"absolute", right:-8, top:10, fontSize:16, color:"#333", zIndex:1 }}>→</div>}
+                            <div style={{ fontSize:9, color:"#444", marginTop:4 }}>{s.pct>0?s.pct+"%":""}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Key metrics */}
+                    <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:12, marginBottom:16 }}>
+                      {[
+                        ["Total Affiliate GMV",   "$"+(((summary.totalGmv||0)/1000).toFixed(1))+"k", "#c77dff"],
+                        ["Video Hit Rate",         (summary.videoHitRate||0)+"%", summary.videoHitRate>=15?"#00e5a0":summary.videoHitRate>=10?"#f5c518":"#ff4d6d"],
+                        ["Total Videos",           (summary.totalVideos||0).toLocaleString(), "#aaa"],
+                        ["Ship Rate",              (summary.shipRate||0)+"%", summary.shipRate>=60?"#00e5a0":summary.shipRate>=40?"#f5c518":"#ff4d6d"],
+                      ].map(([k,v,c])=>(
+                        <div key={k} style={{ ...S.card, textAlign:"center" }}>
+                          <div style={{ fontSize:9, color:"#444", letterSpacing:1.5, textTransform:"uppercase", fontWeight:700, marginBottom:8 }}>{k}</div>
+                          <div style={{ fontSize:22, fontWeight:700, color:c }}>{v}</div>
                         </div>
-                        <div style={{ display:"flex", gap:16, fontSize:11 }}>
-                          <span style={{ fontWeight:700, color:"#c77dff", minWidth:60 }}>${(rev/1000).toFixed(1)}k</span>
-                          <span style={{ color:"#555", minWidth:70 }}>{(views/1000).toFixed(0)}K views</span>
-                          <span style={{ color:"#555", minWidth:55 }}>{orders} orders</span>
-                          <span style={{ color:avgVcr>=3?"#00e5a0":avgVcr>=2?"#f5c518":"#ff4d6d", minWidth:55 }}>VCR {avgVcr}%</span>
-                          <span style={{ fontSize:10, color:"#444" }}>{prodVideos.length} video{prodVideos.length!==1?"s":""} · {[...new Set(prodVideos.map(v=>v.handle))].length} creators</span>
+                      ))}
+                    </div>
+
+                    {/* Monthly GMV trend */}
+                    {monthly.length>0 && (
+                      <div style={{ ...S.card }}>
+                        <div style={{ fontSize:9, letterSpacing:2, textTransform:"uppercase", color:"#444", fontWeight:700, marginBottom:16 }}>Monthly Video GMV Trend</div>
+                        <div style={{ display:"flex", alignItems:"flex-end", gap:6, height:120 }}>
+                          {monthly.map((m,i)=>{
+                            const maxGmv = Math.max(...monthly.map(x=>x.gmv||0),1);
+                            const barH = Math.max(((m.gmv||0)/maxGmv)*100,2);
+                            return (
+                              <div key={i} style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", gap:3 }}>
+                                <div style={{ fontSize:8, color:"#c77dff", fontWeight:700 }}>{m.gmv>0?"$"+(m.gmv/1000).toFixed(1)+"k":""}</div>
+                                <div style={{ width:"100%", height:barH, background:"#c77dff", borderRadius:"3px 3px 0 0", opacity:0.8 }}/>
+                                <div style={{ fontSize:7, color:"#444", textAlign:"center", whiteSpace:"nowrap" }}>{m.month}</div>
+                              </div>
+                            );
+                          })}
                         </div>
                       </div>
-                    );
-                  })}
-                </div>
+                    )}
+                  </div>
+                );
 
-                {/* Tier breakdown */}
-                <div style={{ ...S.card }}>
-                  <div style={{ fontSize:9, letterSpacing:2, textTransform:"uppercase", color:"#444", fontWeight:700, marginBottom:16 }}>Performance by Creator Tier</div>
-                  <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:12 }}>
-                    {["nano","micro","mid","macro"].map(tier=>{
-                      const tCreators = affiliates.filter(a=>a.tier===tier);
-                      if (!tCreators.length) return null;
-                      const tRev    = tCreators.reduce((s,a)=>s+a.totalRevenue,0);
-                      const tViews  = tCreators.reduce((s,a)=>s+a.totalViews,0);
-                      const tOrders = tCreators.reduce((s,a)=>s+a.totalOrders,0);
-                      const tAvgComm= r2(tCreators.reduce((s,a)=>s+a.commission,0)/tCreators.length);
-                      const tierColors = { nano:"#00e5a0", micro:"#f5c518", mid:"#ff6b35", macro:"#c77dff" };
-                      const c = tierColors[tier];
-                      return (
-                        <div key={tier} style={{ background:"rgba(255,255,255,0.03)", borderRadius:10, padding:"14px 14px", border:`1px solid ${c}22` }}>
-                          <div style={{ fontSize:9, letterSpacing:1.5, textTransform:"uppercase", color:c, fontWeight:700, marginBottom:10 }}>{tier} <span style={{ color:"#444", fontWeight:400 }}>({tCreators.length})</span></div>
-                          {[["Revenue","$"+(tRev/1000).toFixed(1)+"k"],["Views",(tViews/1000).toFixed(0)+"K"],["Orders",tOrders],["Avg Comm",tAvgComm+"%"]].map(([k,v])=>(
-                            <div key={k} style={{ display:"flex", justifyContent:"space-between", marginBottom:6, fontSize:11 }}>
-                              <span style={{ color:"#555" }}>{k}</span>
-                              <span style={{ fontWeight:700 }}>{v}</span>
-                            </div>
+                // ── CREATORS ──
+                if (eukaView==="creators") return (
+                  <div style={S.card}>
+                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+                      <div style={{ fontSize:9, letterSpacing:2, textTransform:"uppercase", color:"#444", fontWeight:700 }}>Top Creators by {eukaSortBy==="gmv"?"GMV":eukaSortBy==="videos"?"Videos":eukaSortBy==="hitrate"?"Hit Rate":"Avg Rev/Video"}</div>
+                      <div style={{ display:"flex", gap:6 }}>
+                        {["gmv","videos","hitrate","avgrev"].map(s=>(
+                          <button key={s} onClick={()=>setEukaSortBy(s)} style={{ fontSize:9, fontWeight:700, padding:"2px 8px", borderRadius:20, cursor:"pointer", background:eukaSortBy===s?"rgba(199,125,255,0.12)":"transparent", color:eukaSortBy===s?"#c77dff":"#555", border:`1px solid ${eukaSortBy===s?"rgba(199,125,255,0.3)":"rgba(255,255,255,0.07)"}` }}>
+                            {s==="gmv"?"GMV":s==="videos"?"Videos":s==="hitrate"?"Hit Rate":"Avg Rev"}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
+                      <thead><tr>{["Creator","Followers","Total GMV","Videos","Hit Rate","Avg Rev/Video"].map(h=><th key={h} style={{ ...S.th, fontSize:8 }}>{h}</th>)}</tr></thead>
+                      <tbody>
+                        {[...creators].sort((a,b)=>{
+                          if (eukaSortBy==="videos")  return (b.videos||0)-(a.videos||0);
+                          if (eukaSortBy==="hitrate")  return (b.hitRate||0)-(a.hitRate||0);
+                          if (eukaSortBy==="avgrev")   return (b.avgRevPerVideo||0)-(a.avgRevPerVideo||0);
+                          return (b.gmv||0)-(a.gmv||0);
+                        }).map((c,i)=>(
+                          <tr key={i}>
+                            <td style={S.td}><span style={{ fontWeight:700, color:"#c77dff" }}>{c.handle||"—"}</span></td>
+                            <td style={S.td}><span style={{ color:"#aaa" }}>{c.followers>0?(c.followers/1000).toFixed(0)+"K":"—"}</span></td>
+                            <td style={S.td}><span style={{ fontWeight:700 }}>{c.gmv>0?"$"+(c.gmv/1000).toFixed(1)+"k":"—"}</span></td>
+                            <td style={S.td}>{c.videos||"—"}</td>
+                            <td style={S.td}><span style={{ color:(c.hitRate||0)>=20?"#00e5a0":(c.hitRate||0)>=10?"#f5c518":"#ff4d6d" }}>{c.hitRate!=null?c.hitRate+"%":"—"}</span></td>
+                            <td style={S.td}><span style={{ color:"#00e5a0" }}>{c.avgRevPerVideo>0?"$"+r2(c.avgRevPerVideo):"—"}</span></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    {creators.length===0&&<div style={{ padding:"30px 0", textAlign:"center", color:"#555", fontSize:12 }}>No creator data — click Refresh to load from Euka.</div>}
+                  </div>
+                );
+
+                // ── VIDEOS ──
+                if (eukaView==="videos") {
+                  const prods = [...new Set(videos.map(v=>v.product).filter(Boolean))];
+                  const filtered = eukaVideoFilter==="all" ? videos : videos.filter(v=>v.product===eukaVideoFilter);
+                  return (
+                    <div>
+                      {prods.length>0 && (
+                        <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:14, alignItems:"center" }}>
+                          <span style={{ fontSize:10, color:"#555" }}>Filter:</span>
+                          <button onClick={()=>setEukaVideoFilter("all")} style={{ fontSize:10, fontWeight:700, padding:"3px 10px", borderRadius:20, cursor:"pointer", background:eukaVideoFilter==="all"?"rgba(255,255,255,0.1)":"transparent", color:eukaVideoFilter==="all"?"#e8e8f0":"#555", border:"1px solid rgba(255,255,255,0.1)" }}>All Products</button>
+                          {prods.map(p=>(
+                            <button key={p} onClick={()=>setEukaVideoFilter(p)} style={{ fontSize:10, fontWeight:700, padding:"3px 10px", borderRadius:20, cursor:"pointer", background:eukaVideoFilter===p?"rgba(199,125,255,0.12)":"transparent", color:eukaVideoFilter===p?"#c77dff":"#555", border:`1px solid ${eukaVideoFilter===p?"rgba(199,125,255,0.3)":"rgba(255,255,255,0.08)"}`, maxWidth:140, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{p}</button>
                           ))}
                         </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-            )}
+                      )}
+                      <div style={S.card}>
+                        <div style={{ fontSize:9, letterSpacing:2, textTransform:"uppercase", color:"#444", fontWeight:700, marginBottom:16 }}>{filtered.length} Videos{eukaVideoFilter!=="all"?` — ${eukaVideoFilter}`:""}</div>
+                        <table style={{ width:"100%", borderCollapse:"collapse", fontSize:11 }}>
+                          <thead><tr>{["Creator","Video","Product","Views","Revenue","Items Sold","Date"].map(h=><th key={h} style={{ ...S.th, fontSize:8 }}>{h}</th>)}</tr></thead>
+                          <tbody>
+                            {filtered.map((v,i)=>(
+                              <tr key={i}>
+                                <td style={S.td}><span style={{ fontWeight:700, color:"#c77dff" }}>{v.handle||"—"}</span></td>
+                                <td style={{ ...S.td, maxWidth:200 }}><span style={{ color:"#888", fontSize:10 }}>{v.description||"—"}</span></td>
+                                <td style={S.td}><span style={{ color:"#aaa", fontSize:10 }}>{v.product||"—"}</span></td>
+                                <td style={S.td}><span style={{ color:"#aaa" }}>{v.views>0?(v.views/1000).toFixed(0)+"K":"—"}</span></td>
+                                <td style={S.td}><span style={{ fontWeight:700, color:"#c77dff" }}>{v.revenue>0?"$"+(v.revenue/1000).toFixed(1)+"k":"—"}</span></td>
+                                <td style={S.td}>{v.itemsSold||"—"}</td>
+                                <td style={S.td}><span style={{ fontSize:10, color:"#555" }}>{v.date||"—"}</span></td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                        {filtered.length===0&&<div style={{ padding:"30px 0", textAlign:"center", color:"#555", fontSize:12 }}>No videos yet.</div>}
+                      </div>
+                    </div>
+                  );
+                }
 
-            {/* ── CREATORS VIEW ── */}
-            {affView==="creators" && (
-              <div style={S.card}>
-                <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
-                  <thead>
-                    <tr>{["Creator","Tier","Followers","Revenue","Views","Orders","Avg VCR","Commission","Videos",""].map(h=>(
-                      <th key={h} style={{ ...S.th, fontSize:8, whiteSpace:"nowrap" }}>{h}</th>
-                    ))}</tr>
-                  </thead>
-                  <tbody>
-                    {[...affiliates].sort((a,b)=>{
-                      if (affSortBy==="views")  return b.totalViews-a.totalViews;
-                      if (affSortBy==="orders") return b.totalOrders-a.totalOrders;
-                      if (affSortBy==="vcr") {
-                        const aVcr = a.videos.length ? r2(a.videos.reduce((s,v)=>s+v.vcr,0)/a.videos.length) : 0;
-                        const bVcr = b.videos.length ? r2(b.videos.reduce((s,v)=>s+v.vcr,0)/b.videos.length) : 0;
-                        return bVcr-aVcr;
-                      }
-                      return b.totalRevenue-a.totalRevenue;
-                    }).map(creator=>{
-                      const avgVcr = creator.videos.length ? r2(creator.videos.reduce((s,v)=>s+v.vcr,0)/creator.videos.length) : 0;
-                      const tierColors = { nano:"#00e5a0", micro:"#f5c518", mid:"#ff6b35", macro:"#c77dff" };
-                      const tc = tierColors[creator.tier]||"#aaa";
-                      const isExpanded = affExpandedCreator===creator.id;
-                      return (
-                        <>
-                          <tr key={creator.id} style={{ background:isExpanded?"rgba(199,125,255,0.04)":"transparent" }}>
-                            <td style={S.td}><span style={{ fontWeight:700, color:"#c77dff" }}>{creator.handle}</span></td>
-                            <td style={S.td}><span style={{ fontSize:9, fontWeight:700, color:tc, background:tc+"18", padding:"2px 7px", borderRadius:20, textTransform:"capitalize" }}>{creator.tier}</span></td>
-                            <td style={S.td}><span style={{ color:"#aaa" }}>{creator.followers>0?(creator.followers/1000).toFixed(0)+"K":"—"}</span></td>
-                            <td style={S.td}><span style={{ fontWeight:700, color:"#c77dff" }}>${(creator.totalRevenue/1000).toFixed(1)}k</span></td>
-                            <td style={S.td}><span style={{ color:"#aaa" }}>{(creator.totalViews/1000).toFixed(0)}K</span></td>
-                            <td style={S.td}>{creator.totalOrders}</td>
-                            <td style={S.td}><span style={{ color:avgVcr>=3?"#00e5a0":avgVcr>=2?"#f5c518":"#ff4d6d" }}>{avgVcr>0?avgVcr+"%":"—"}</span></td>
-                            <td style={S.td}><span style={{ color:"#f5c518" }}>{creator.commission}%</span></td>
-                            <td style={S.td}><span style={{ color:"#555" }}>{creator.videos.length}</span></td>
-                            <td style={S.td}>
-                              <button onClick={()=>setAffExpandedCreator(isExpanded?null:creator.id)} style={{ fontSize:10, padding:"3px 8px", borderRadius:5, cursor:"pointer", background:"rgba(199,125,255,0.08)", color:"#c77dff", border:"1px solid rgba(199,125,255,0.2)" }}>
-                                {isExpanded?"▲ Hide":"▼ Videos"}
-                              </button>
-                            </td>
-                          </tr>
-                          {isExpanded && creator.videos.map((v,vi)=>(
-                            <tr key={creator.id+"v"+vi} style={{ background:"rgba(199,125,255,0.02)" }}>
-                              <td colSpan={2} style={{ ...S.td, paddingLeft:20 }}><span style={{ fontSize:11, color:"#888", fontStyle:"italic" }}>{v.title}</span></td>
-                              <td style={S.td}><span style={{ fontSize:10, color:"#c77dff" }}>{v.product}</span></td>
-                              <td style={S.td}><span style={{ fontWeight:700 }}>${(v.revenue/1000).toFixed(1)}k</span></td>
-                              <td style={S.td}><span style={{ color:"#aaa" }}>{(v.views/1000).toFixed(0)}K</span></td>
-                              <td style={S.td}>{v.orders}</td>
-                              <td style={S.td}><span style={{ color:v.vcr>=3?"#00e5a0":v.vcr>=2?"#f5c518":"#ff4d6d" }}>{v.vcr}%</span></td>
-                              <td style={{ ...S.td, fontSize:10, color:"#555" }}>{v.date}</td>
-                              <td colSpan={2} style={S.td}/>
-                            </tr>
-                          ))}
-                        </>
-                      );
-                    })}
-                  </tbody>
-                </table>
-                {affiliates.length===0&&<div style={{ padding:"30px 0", textAlign:"center", color:"#555", fontSize:12 }}>No affiliate data yet — paste creator data above.</div>}
-              </div>
-            )}
+                // ── CAMPAIGNS ──
+                if (eukaView==="campaigns") {
+                  const maxRev = Math.max(...campaigns.map(c=>c.revenue||0),1);
+                  return (
+                    <div>
+                      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))", gap:14, marginBottom:16 }}>
+                        {campaigns.slice(0,6).map((c,i)=>{
+                          const shipRate = c.requests>0?r2(c.shipped/c.requests*100):0;
+                          const postRate = c.shipped>0?r2(c.videos/c.shipped*100):0;
+                          return (
+                            <div key={i} style={{ ...S.card, border:"1px solid rgba(199,125,255,0.15)" }}>
+                              <div style={{ fontSize:11, fontWeight:700, color:"#e8e8f0", marginBottom:10, lineHeight:1.3 }}>{c.name||"Campaign"}</div>
+                              <div style={{ marginBottom:10 }}>
+                                <MiniBar value={c.revenue||0} max={maxRev} color="#c77dff"/>
+                                <div style={{ fontSize:11, fontWeight:700, color:"#c77dff", marginTop:4 }}>{c.revenue>0?"$"+(c.revenue/1000).toFixed(1)+"k attributed":"No revenue data"}</div>
+                              </div>
+                              <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:8 }}>
+                                {[["Requests",(c.requests||0).toLocaleString(),"#aaa"],["Shipped",(c.shipped||0).toLocaleString()+" ("+shipRate+"%)", shipRate>=60?"#00e5a0":"#f5c518"],["Videos",(c.videos||0)+" ("+postRate+"%)", postRate>=60?"#00e5a0":"#f5c518"]].map(([k,v,col])=>(
+                                  <div key={k} style={{ background:"rgba(255,255,255,0.03)", borderRadius:6, padding:"7px 9px" }}>
+                                    <div style={{ fontSize:8, color:"#444", letterSpacing:1, textTransform:"uppercase", marginBottom:2 }}>{k}</div>
+                                    <div style={{ fontSize:11, fontWeight:700, color:col }}>{v}</div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      {/* Full campaign table */}
+                      <div style={S.card}>
+                        <div style={{ fontSize:9, letterSpacing:2, textTransform:"uppercase", color:"#444", fontWeight:700, marginBottom:16 }}>All Campaigns</div>
+                        <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
+                          <thead><tr>{["Campaign","Requests","Shipped","Ship Rate","Videos Posted","Post Rate","Attributed GMV"].map(h=><th key={h} style={{ ...S.th, fontSize:8 }}>{h}</th>)}</tr></thead>
+                          <tbody>
+                            {[...campaigns].sort((a,b)=>(b.revenue||0)-(a.revenue||0)).map((c,i)=>{
+                              const shipRate = c.requests>0?r2((c.shipped||0)/c.requests*100):0;
+                              const postRate = c.shipped>0?r2((c.videos||0)/(c.shipped||1)*100):0;
+                              return (
+                                <tr key={i}>
+                                  <td style={{ ...S.td, maxWidth:200, fontWeight:600 }}>{c.name||"—"}</td>
+                                  <td style={S.td}>{(c.requests||0).toLocaleString()}</td>
+                                  <td style={S.td}>{(c.shipped||0).toLocaleString()}</td>
+                                  <td style={S.td}><span style={{ color:shipRate>=60?"#00e5a0":shipRate>=40?"#f5c518":"#ff4d6d" }}>{shipRate}%</span></td>
+                                  <td style={S.td}>{c.videos||0}</td>
+                                  <td style={S.td}><span style={{ color:postRate>=60?"#00e5a0":postRate>=40?"#f5c518":"#ff4d6d" }}>{postRate}%</span></td>
+                                  <td style={S.td}><span style={{ fontWeight:700, color:"#c77dff" }}>{c.revenue>0?"$"+(c.revenue/1000).toFixed(1)+"k":"—"}</span></td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                        {campaigns.length===0&&<div style={{ padding:"24px 0", textAlign:"center", color:"#555", fontSize:12 }}>No campaign data — click Refresh to load from Euka.</div>}
+                      </div>
+                    </div>
+                  );
+                }
 
-            {/* ── VIDEOS VIEW ── */}
-            {affView==="videos" && (
-              <div style={S.card}>
-                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
-                  <div style={{ fontSize:9, letterSpacing:2, textTransform:"uppercase", color:"#444", fontWeight:700 }}>
-                    {filteredVideos.length} video{filteredVideos.length!==1?"s":""}{affProductFilter!=="all"?` for ${affProductFilter}`:""}
-                  </div>
-                </div>
-                <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
-                  <thead>
-                    <tr>{["Video Title","Creator","Tier","Product","Revenue","Views","Orders","VCR","Date"].map(h=>(
-                      <th key={h} style={{ ...S.th, fontSize:8, whiteSpace:"nowrap" }}>{h}</th>
-                    ))}</tr>
-                  </thead>
-                  <tbody>
-                    {[...filteredVideos].sort((a,b)=>{
-                      if (affSortBy==="views")  return b.views-a.views;
-                      if (affSortBy==="orders") return b.orders-a.orders;
-                      if (affSortBy==="vcr")    return b.vcr-a.vcr;
-                      return b.revenue-a.revenue;
-                    }).map((v,i)=>{
-                      const tierColors = { nano:"#00e5a0", micro:"#f5c518", mid:"#ff6b35", macro:"#c77dff" };
-                      const tc = tierColors[v.tier]||"#aaa";
-                      return (
-                        <tr key={i}>
-                          <td style={{ ...S.td, maxWidth:200 }}><span style={{ fontWeight:600 }}>{v.title}</span></td>
-                          <td style={S.td}><span style={{ color:"#c77dff", fontWeight:700 }}>{v.handle}</span></td>
-                          <td style={S.td}><span style={{ fontSize:9, fontWeight:700, color:tc, background:tc+"18", padding:"2px 6px", borderRadius:20, textTransform:"capitalize" }}>{v.tier}</span></td>
-                          <td style={S.td}><span style={{ color:"#aaa", fontSize:11 }}>{v.product}</span></td>
-                          <td style={S.td}><span style={{ fontWeight:700, color:"#c77dff" }}>${(v.revenue/1000).toFixed(1)}k</span></td>
-                          <td style={S.td}><span style={{ color:"#aaa" }}>{(v.views/1000).toFixed(0)}K</span></td>
-                          <td style={S.td}>{v.orders}</td>
-                          <td style={S.td}><span style={{ color:v.vcr>=3?"#00e5a0":v.vcr>=2?"#f5c518":"#ff4d6d", fontWeight:700 }}>{v.vcr}%</span></td>
-                          <td style={S.td}><span style={{ fontSize:10, color:"#555" }}>{v.date}</span></td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-                {filteredVideos.length===0&&<div style={{ padding:"30px 0", textAlign:"center", color:"#555", fontSize:12 }}>No videos{affProductFilter!=="all"?` for ${affProductFilter}`:""} yet.</div>}
-              </div>
-            )}
+                return null;
+              })()}
+            </div>
           </div>
         )}
 
