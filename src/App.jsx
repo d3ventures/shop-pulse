@@ -3117,7 +3117,7 @@ function BrandDashboard({ brandId, brandName, brandColor, onBack }) {
                         const storeName= currentEukaStore.name;
                         const fetchFromEuka = async (from, to) => {
                           const clause = from||to ? ` Filter data to the period from ${from||"the beginning"} to ${to||"today"}.` : " Use all-time data.";
-                          const response = await fetch("https://api.anthropic.com/v1/messages", {
+                          const response = await fetch("http://localhost:3001/api/claude", {
                             method:"POST", headers:{"Content-Type":"application/json"},
                             body: JSON.stringify({
                               model:"claude-sonnet-4-20250514", max_tokens:1000,
