@@ -3121,7 +3121,7 @@ function BrandDashboard({ brandId, brandName, brandColor, onBack }) {
                             method:"POST", headers:{"Content-Type":"application/json"},
                             body: JSON.stringify({
                               model:"claude-sonnet-4-20250514", max_tokens:1000,
-                              mcp_servers:[{type:"url",url:"https://app.euka.ai/api/mcp",name:"euka-mcp"}],
+                              mcp_servers:[{type:"url",url:"https://app.euka.ai/api/mcp",name:"euka-mcp",authorization_token:"euka_mcp_8J3EBl9t3T3aTXvBhPgDteAE7UsaKfltKJVlZNFej7M"}],
                               messages:[{role:"user",content:`For Euka store ID ${storeId}, query affiliate performance data.${clause} Return ONLY a JSON object (no markdown) with this structure: {"summary":{"totalCreators":0,"creatorsWithGmv":0,"totalGmv":0,"totalVideos":0,"videoHitRate":0,"samplesSent":0,"samplesShipped":0,"shipRate":0},"topCreators":[{"handle":"","followers":0,"gmv":0,"videos":0,"hitRate":0,"avgRevPerVideo":0}],"topVideos":[{"handle":"","description":"","product":"","views":0,"revenue":0,"itemsSold":0,"date":""}],"campaigns":[{"name":"","requests":0,"shipped":0,"videos":0,"revenue":0}],"monthlyTrend":[{"month":"","videos":0,"gmv":0,"creators":0}]} Limit arrays to 25 rows. Return only JSON.`}]
                             })
                           });
