@@ -3117,11 +3117,8 @@ function BrandDashboard({ brandId, brandName, brandColor, onBack }) {
                         const storeName= currentEukaStore.name;
                         const fetchFromEuka = async (from, to) => {
                           const clause = from||to ? ` Filter data to the period from ${from||"the beginning"} to ${to||"today"}.` : " Use all-time data.";
-                          const response = await fetch("https://zjuevamodebkrtnlcmxr.supabase.co/functions/v1/claude-proxy", {
-                            method:"POST", headers:{
-                              "Content-Type":"application/json",
-                              "Authorization":`Bearer ${SUPABASE_KEY}`,
-                            },
+                          const response = await fetch("https://shop-pulse-a1mcduq4z-d3ventures-projects.vercel.app/api/claude", {
+                            method:"POST", headers:{"Content-Type":"application/json"},
                             body: JSON.stringify({
                               model:"claude-sonnet-4-20250514", max_tokens:1000,
                               mcp_servers:[{type:"url",url:"https://app.euka.ai/api/mcp",name:"euka-mcp"}],
