@@ -1,4 +1,78 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
+
+// ─── SUPABASE CONFIG ───────────────────────────────────────────────────────────
+const SUPABASE_URL  = "https://zjuevamodebkrtnlcmxr.supabase.co";
+const SUPABASE_KEY  = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpqdWV2YW1vZGVia3J0bmxjbXhyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkzMDExNjUsImV4cCI6MjA5NDg3NzE2NX0.qs1n-di8KAb86w7mWSC0yZcQHYHC8x8FQKwcY_9jvUA";
+
+const sb = {
+  // Generic select with optional filters
+  async select(table, { filter, order, limit } = {}) {
+    let url = `${SUPABASE_URL}/rest/v1/${table}?select=*`;
+    if (filter) url += `&${filter}`;
+    if (order)  url += `&order=${order}`;
+    if (limit)  url += `&limit=${limit}`;
+    const r = await fetch(url, { headers:{ apikey:SUPABASE_KEY, Authorization:`Bearer ${SUPABASE_KEY}` } });
+    if (!r.ok) throw new Error(await r.text());
+    return r.json();
+  },
+
+  // Upsert rows (insert or update on conflict)
+  async upsert(table, rows, onConflict) {
+    const url = `${SUPABASE_URL}/rest/v1/${table}?on_conflict=${onConflict}`;
+    const r = await fetch(url, {
+      method:"POST",
+      headers:{ apikey:SUPABASE_KEY, Authorization:`Bearer ${SUPABASE_KEY}`, "Content-Type":"application/json", Prefer:"resolution=merge-duplicates,return=minimal" },
+      body: JSON.stringify(Array.isArray(rows) ? rows : [rows]),
+    });
+    if (!r.ok) throw new Error(await r.text());
+    return true;
+  },
+
+  // Insert only (no conflict resolution)
+  async insert(table, rows) {
+    const url = `${SUPABASE_URL}/rest/v1/${table}`;
+    const r = await fetch(url, {
+      method:"POST",
+      headers:{ apikey:SUPABASE_KEY, Authorization:`Bearer ${SUPABASE_KEY}`, "Content-Type":"application/json", Prefer:"return=minimal" },
+      body: JSON.stringify(Array.isArray(rows) ? rows : [rows]),
+    });
+    if (!r.ok) throw new Error(await r.text());
+    return true;
+  },
+
+  // Delete with filter
+  async delete(table, filter) {
+    const url = `${SUPABASE_URL}/rest/v1/${table}?${filter}`;
+    const r = await fetch(url, {
+      method:"DELETE",
+      headers:{ apikey:SUPABASE_KEY, Authorization:`Bearer ${SUPABASE_KEY}` },
+    });
+    if (!r.ok) throw new Error(await r.text());
+    return true;
+  },
+
+  // Execute raw SQL via RPC (for table creation)
+  async rpc(fn, params={}) {
+    const url = `${SUPABASE_URL}/rest/v1/rpc/${fn}`;
+    const r = await fetch(url, {
+      method:"POST",
+      headers:{ apikey:SUPABASE_KEY, Authorization:`Bearer ${SUPABASE_KEY}`, "Content-Type":"application/json" },
+      body: JSON.stringify(params),
+    });
+    if (!r.ok) throw new Error(await r.text());
+    return r.json();
+  },
+};
+
+// ─── SUPABASE TABLE SCHEMAS (created automatically on first sync) ──────────────
+// Tables:
+//   affiliate_snapshots  — daily Euka summary per brand/date
+//   affiliate_creators   — top creators per brand/date
+//   affiliate_videos     — top videos per brand/date
+//   affiliate_campaigns  — campaign stats per brand/date
+//   affiliate_monthly    — monthly GMV trend per brand/date
+
+
 
 // ─── MOCK ORDER DATA (mirrors TikTok Seller Center export format) ─────────────
 const MOCK_ORDERS = [
@@ -1918,7 +1992,77 @@ function BrandDashboard({ brandId, brandName, brandColor, onBack }) {
     zhou:     { id:"421062a7-1dca-459c-bd15-904a9d6b34f4", name:"Zhou Nutrition",   color:"#ff4d6d" },
   };
 
-  const [eukaData,       setEukaData]       = useState({});   // keyed by storeId
+  // Real Heritage Store data seeded from Euka (last pulled May 2026)
+  const HERITAGE_SEED = {
+    summary:{ totalCreators:22468, creatorsWithGmv:3324, totalGmv:1871967, totalVideos:31075, videoHitRate:21.5, samplesSent:27617, samplesShipped:12601, shipRate:45.6 },
+    topCreators:[
+      {handle:"thepricklypear",      followers:245290,  gmv:165919, videos:147, hitRate:63.3, avgRevPerVideo:1123.52},
+      {handle:"kellypaigefinds",     followers:13894,   gmv:73871,  videos:119, hitRate:34.6, avgRevPerVideo:11.77},
+      {handle:"ugcnatasha",          followers:6010,    gmv:61132,  videos:290, hitRate:25.5, avgRevPerVideo:12.68},
+      {handle:"la_familia_pelusa",   followers:301371,  gmv:60985,  videos:26,  hitRate:33.3, avgRevPerVideo:17.91},
+      {handle:"_corirae",            followers:7321,    gmv:54620,  videos:36,  hitRate:40.0, avgRevPerVideo:142.03},
+      {handle:"haileygrant00",       followers:146962,  gmv:53134,  videos:54,  hitRate:55.0, avgRevPerVideo:291.40},
+      {handle:"justreal_teachers",   followers:14874,   gmv:49129,  videos:1,   hitRate:null, avgRevPerVideo:null},
+      {handle:"thecourtneyryan",     followers:10268,   gmv:40949,  videos:42,  hitRate:11.1, avgRevPerVideo:3.51},
+      {handle:"luckydealss",         followers:52003,   gmv:39423,  videos:34,  hitRate:null, avgRevPerVideo:62.21},
+      {handle:"miranda.shopmama",    followers:10669,   gmv:37990,  videos:6,   hitRate:null, avgRevPerVideo:466.60},
+      {handle:"memestumm20",         followers:8944,    gmv:37404,  videos:155, hitRate:15.2, avgRevPerVideo:5.15},
+      {handle:"vaniecec",            followers:10249,   gmv:37258,  videos:2,   hitRate:null, avgRevPerVideo:27.92},
+      {handle:"coffeewithbritta",    followers:99597,   gmv:33711,  videos:12,  hitRate:null, avgRevPerVideo:421.24},
+      {handle:"the_pinder_home",     followers:140145,  gmv:32824,  videos:1,   hitRate:null, avgRevPerVideo:null},
+      {handle:"tiktokshopnatural",   followers:117441,  gmv:28027,  videos:99,  hitRate:52.6, avgRevPerVideo:64.26},
+      {handle:"tiffanys.favorite.finds",followers:3682, gmv:26517,  videos:28,  hitRate:50.0, avgRevPerVideo:923.90},
+      {handle:"britthankin",         followers:60414,   gmv:25030,  videos:61,  hitRate:11.1, avgRevPerVideo:1.01},
+      {handle:"ginalatham",          followers:6426,    gmv:23019,  videos:13,  hitRate:61.5, avgRevPerVideo:1810.35},
+      {handle:"trinity.blair",       followers:3262355, gmv:22748,  videos:1,   hitRate:null, avgRevPerVideo:null},
+      {handle:"chantizzy13",         followers:6363,    gmv:22572,  videos:28,  hitRate:50.0, avgRevPerVideo:23.85},
+    ],
+    topVideos:[
+      {handle:"thepricklypear",     description:"This needs to reach every woman on tik tok, you must know where to apply castor oil", product:"Organic Castor Oil", views:2277287, revenue:61727, itemsSold:2880, date:"2025-12-05"},
+      {handle:"justreal_teachers",  description:"Castor oil packs, moisturizer, hair masks and more!", product:"Organic Castor Oil", views:1726329, revenue:49110, itemsSold:2294, date:"2025-07-29"},
+      {handle:"la_familia_pelusa",  description:"#dealsforyoudays aceite de ricino", product:"Organic Castor Oil", views:1661169, revenue:48534, itemsSold:2368, date:"2025-07-18"},
+      {handle:"thecourtneyryan",    description:"This is a huge bottle of organic castor oil!", product:"Organic Castor Oil", views:974962, revenue:40566, itemsSold:1869, date:"2025-07-24"},
+      {handle:"ugcnatasha",         description:"#castoroil #rolloncastoroil", product:"Castor Oil Roll-On", views:20809984, revenue:39441, itemsSold:5290, date:"2025-06-15"},
+      {handle:"vaniecec",           description:"#castoroil #castoroilbenefit #heritagestore", product:"Organic Castor Oil", views:1469721, revenue:37211, itemsSold:1823, date:"2025-07-12"},
+      {handle:"memestumm20",        description:"#fypシ #fypviral #castoroil", product:"Organic Castor Oil", views:1168363, revenue:36737, itemsSold:1672, date:"2025-08-17"},
+      {handle:"kellypaigefinds",    description:"#castoroil #castoroilbenefit", product:"Castor Oil Roll-On 2-Pack", views:1400813, revenue:34949, itemsSold:2617, date:"2025-10-27"},
+      {handle:"miranda.shopmama",   description:"Literally what?! U know I'm the Castor Oil Queen", product:"Castor Oil Roll-On", views:3614162, revenue:34145, itemsSold:4624, date:"2025-04-25"},
+      {handle:"the_pinder_home",    description:"Game changer #castoroil #rolloncastoroil", product:"Castor Oil Roll-On", views:2872190, revenue:32824, itemsSold:4436, date:"2025-05-20"},
+      {handle:"kellypaigefinds",    description:"My mind is blown castor oil in a roll on for under $10!", product:"Castor Oil Roll-On", views:1656194, revenue:23481, itemsSold:3277, date:"2025-06-26"},
+      {handle:"luckydealss",        description:"Amazing deal", product:"Castor Oil Roll-On", views:1637901, revenue:22996, itemsSold:2980, date:"2025-06-09"},
+      {handle:"trinity.blair",      description:"and it's from my fav and most trusted brand #castoroil", product:"Castor Oil Roll-On", views:7864097, revenue:22725, itemsSold:2796, date:"2025-03-16"},
+      {handle:"ginalatham",         description:"If you love Heritage Store castor oil, now is the best time", product:"Organic Castor Oil", views:610110, revenue:22356, itemsSold:1098, date:"2025-11-28"},
+      {handle:"angeliblanton_",     description:"literally a game changer #castoroil #rolloncastoroil", product:"Castor Oil Roll-On", views:6924393, revenue:21892, itemsSold:2589, date:"2025-08-11"},
+    ],
+    campaigns:[
+      {name:"Outreach 2/20",                           requests:527, shipped:313, videos:167, revenue:261},
+      {name:"Contest Push 2/27",                        requests:126, shipped:79,  videos:37,  revenue:230},
+      {name:"Heritage Store April Outreach 1",          requests:281, shipped:223, videos:103, revenue:104},
+      {name:"Contest Push 3/13",                        requests:300, shipped:243, videos:75,  revenue:86},
+      {name:"Heritage Store Best Sellers 4/10",         requests:141, shipped:70,  videos:29,  revenue:73},
+      {name:"Contest Push 3/6",                         requests:214, shipped:150, videos:52,  revenue:55},
+      {name:"Memorial Day Target Collab 5/19",          requests:0,   shipped:0,   videos:0,   revenue:0},
+      {name:"Revenue Generating Creators Memorial Day", requests:0,   shipped:0,   videos:0,   revenue:0},
+      {name:"Mother's Day GMV Challenge PR",            requests:0,   shipped:0,   videos:0,   revenue:0},
+    ],
+    monthlyTrend:[
+      {month:"May '25",  gmv:111128, videos:1998,  creators:58982},
+      {month:"Jun '25",  gmv:143968, videos:2165,  creators:63243},
+      {month:"Jul '25",  gmv:236445, videos:6085,  creators:90536},
+      {month:"Aug '25",  gmv:191930, videos:4217,  creators:68749},
+      {month:"Sep '25",  gmv:82485,  videos:2360,  creators:46754},
+      {month:"Oct '25",  gmv:90870,  videos:1800,  creators:71220},
+      {month:"Nov '25",  gmv:140815, videos:1842,  creators:97685},
+      {month:"Dec '25",  gmv:188699, videos:2316,  creators:51210},
+      {month:"Jan '26",  gmv:187995, videos:2312,  creators:58940},
+      {month:"Feb '26",  gmv:164551, videos:1553,  creators:51893},
+      {month:"Mar '26",  gmv:135823, videos:2392,  creators:46265},
+      {month:"Apr '26",  gmv:88996,  videos:1700,  creators:33464},
+      {month:"May '26",  gmv:45840,  videos:775,   creators:22357},
+    ],
+  };
+
+  const [eukaData,       setEukaData]       = useState({"4bc04f0b-f9f3-4fae-846f-74d76b73dbeb": HERITAGE_SEED});
   const [eukaLoading,    setEukaLoading]    = useState({});
   const [eukaError,      setEukaError]      = useState({});
   const [eukaView,       setEukaView]       = useState("overview");  // overview|creators|videos|campaigns
@@ -1943,7 +2087,6 @@ function BrandDashboard({ brandId, brandName, brandColor, onBack }) {
 
   // Get store id from the current brand context (brandId prop maps to EUKA_STORES)
   const [selectedEukaStoreKey, setSelectedEukaStoreKey] = useState(()=>{
-    // Auto-select based on brandName if available
     if (brandName) {
       const match = Object.entries(EUKA_STORES).find(([,s])=>
         s.name.toLowerCase().includes(brandName.toLowerCase().split(" ")[0].toLowerCase()) ||
@@ -1953,6 +2096,156 @@ function BrandDashboard({ brandId, brandName, brandColor, onBack }) {
     }
     return "heritage";
   });
+
+  const [sbStatus,  setSbStatus]  = useState("idle");  // idle | syncing | reading | ok | error
+  const [sbError,   setSbError]   = useState("");
+  const [sbLastSync,setSbLastSync]= useState({});  // keyed by storeId → timestamp
+
+  // ── Write Euka data to Supabase ──────────────────────────────────────────
+  const writeEukaToSupabase = async (storeId, storeName, data, dateFrom, dateTo) => {
+    const today     = new Date().toISOString().slice(0,10);
+    const periodKey = `${dateFrom||"all"}_${dateTo||"all"}`;
+
+    try {
+      // 1. Summary snapshot
+      await sb.upsert("affiliate_snapshots", {
+        store_id:        storeId,
+        store_name:      storeName,
+        snapshot_date:   today,
+        period_from:     dateFrom||null,
+        period_to:       dateTo||null,
+        period_key:      periodKey,
+        total_creators:  data.summary?.totalCreators||0,
+        creators_with_gmv: data.summary?.creatorsWithGmv||0,
+        total_gmv:       data.summary?.totalGmv||0,
+        total_videos:    data.summary?.totalVideos||0,
+        video_hit_rate:  data.summary?.videoHitRate||0,
+        samples_sent:    data.summary?.samplesSent||0,
+        samples_shipped: data.summary?.samplesShipped||0,
+        ship_rate:       data.summary?.shipRate||0,
+      }, "store_id,snapshot_date,period_key");
+
+      // 2. Creators
+      if (data.topCreators?.length) {
+        const rows = data.topCreators.map(c=>({
+          store_id:     storeId,
+          snapshot_date:today,
+          period_key:   periodKey,
+          handle:       c.handle||"",
+          followers:    c.followers||0,
+          gmv:          c.gmv||0,
+          videos:       c.videos||0,
+          hit_rate:     c.hitRate||0,
+          avg_rev_per_video: c.avgRevPerVideo||0,
+        }));
+        // Delete existing for this store+date+period, then insert fresh
+        await sb.delete("affiliate_creators", `store_id=eq.${storeId}&snapshot_date=eq.${today}&period_key=eq.${periodKey}`);
+        await sb.insert("affiliate_creators", rows);
+      }
+
+      // 3. Videos
+      if (data.topVideos?.length) {
+        const rows = data.topVideos.map(v=>({
+          store_id:     storeId,
+          snapshot_date:today,
+          period_key:   periodKey,
+          handle:       v.handle||"",
+          description:  v.description||"",
+          product:      v.product||"",
+          views:        v.views||0,
+          revenue:      v.revenue||0,
+          items_sold:   v.itemsSold||0,
+          video_date:   v.date||null,
+        }));
+        await sb.delete("affiliate_videos", `store_id=eq.${storeId}&snapshot_date=eq.${today}&period_key=eq.${periodKey}`);
+        await sb.insert("affiliate_videos", rows);
+      }
+
+      // 4. Campaigns
+      if (data.campaigns?.length) {
+        const rows = data.campaigns.map(c=>({
+          store_id:     storeId,
+          snapshot_date:today,
+          period_key:   periodKey,
+          campaign_name:c.name||"",
+          requests:     c.requests||0,
+          shipped:      c.shipped||0,
+          videos:       c.videos||0,
+          revenue:      c.revenue||0,
+        }));
+        await sb.delete("affiliate_campaigns", `store_id=eq.${storeId}&snapshot_date=eq.${today}&period_key=eq.${periodKey}`);
+        await sb.insert("affiliate_campaigns", rows);
+      }
+
+      // 5. Monthly trend
+      if (data.monthlyTrend?.length) {
+        const rows = data.monthlyTrend.map(m=>({
+          store_id:     storeId,
+          snapshot_date:today,
+          period_key:   periodKey,
+          month:        m.month||"",
+          videos:       m.videos||0,
+          gmv:          m.gmv||0,
+          creators:     m.creators||0,
+        }));
+        await sb.delete("affiliate_monthly", `store_id=eq.${storeId}&snapshot_date=eq.${today}&period_key=eq.${periodKey}`);
+        await sb.insert("affiliate_monthly", rows);
+      }
+
+      setSbLastSync(prev=>({...prev,[storeId+periodKey]:today}));
+      return true;
+    } catch(err) {
+      console.error("Supabase write error:", err);
+      setSbError("Supabase write failed: "+err.message+". Tables may need to be created — see setup instructions.");
+      return false;
+    }
+  };
+
+  // ── Read Euka data from Supabase (most recent snapshot for this store+period) ──
+  const readEukaFromSupabase = async (storeId, dateFrom, dateTo) => {
+    const periodKey = `${dateFrom||"all"}_${dateTo||"all"}`;
+    try {
+      // Get most recent snapshot
+      const snaps = await sb.select("affiliate_snapshots", {
+        filter: `store_id=eq.${storeId}&period_key=eq.${periodKey}`,
+        order:  "snapshot_date.desc",
+        limit:  1,
+      });
+      if (!snaps.length) return null;
+      const snap = snaps[0];
+      const date = snap.snapshot_date;
+
+      // Get associated data
+      const [creators, videos, campaigns, monthly] = await Promise.all([
+        sb.select("affiliate_creators", { filter:`store_id=eq.${storeId}&snapshot_date=eq.${date}&period_key=eq.${periodKey}`, order:"gmv.desc" }),
+        sb.select("affiliate_videos",   { filter:`store_id=eq.${storeId}&snapshot_date=eq.${date}&period_key=eq.${periodKey}`, order:"revenue.desc" }),
+        sb.select("affiliate_campaigns",{ filter:`store_id=eq.${storeId}&snapshot_date=eq.${date}&period_key=eq.${periodKey}`, order:"revenue.desc" }),
+        sb.select("affiliate_monthly",  { filter:`store_id=eq.${storeId}&snapshot_date=eq.${date}&period_key=eq.${periodKey}` }),
+      ]);
+
+      return {
+        _source:    "supabase",
+        _syncedAt:  date,
+        summary: {
+          totalCreators:   snap.total_creators,
+          creatorsWithGmv: snap.creators_with_gmv,
+          totalGmv:        snap.total_gmv,
+          totalVideos:     snap.total_videos,
+          videoHitRate:    snap.video_hit_rate,
+          samplesSent:     snap.samples_sent,
+          samplesShipped:  snap.samples_shipped,
+          shipRate:        snap.ship_rate,
+        },
+        topCreators: creators.map(c=>({ handle:c.handle, followers:c.followers, gmv:c.gmv, videos:c.videos, hitRate:c.hit_rate, avgRevPerVideo:c.avg_rev_per_video })),
+        topVideos:   videos.map(v=>({ handle:v.handle, description:v.description, product:v.product, views:v.views, revenue:v.revenue, itemsSold:v.items_sold, date:v.video_date })),
+        campaigns:   campaigns.map(c=>({ name:c.campaign_name, requests:c.requests, shipped:c.shipped, videos:c.videos, revenue:c.revenue })),
+        monthlyTrend:monthly.map(m=>({ month:m.month, videos:m.videos, gmv:m.gmv, creators:m.creators })),
+      };
+    } catch(err) {
+      console.error("Supabase read error:", err);
+      return null;
+    }
+  };
 
   const currentEukaStore = (() => {
     // Manual override from dropdown
@@ -2798,60 +3091,66 @@ function BrandDashboard({ brandId, brandName, brandColor, onBack }) {
                       <button key={v.id} onClick={()=>setEukaView(v.id)} style={{ fontSize:11, fontWeight:700, letterSpacing:1, textTransform:"uppercase", padding:"6px 12px", cursor:"pointer", borderRadius:5, background:eukaView===v.id?"rgba(199,125,255,0.12)":"none", color:eukaView===v.id?"#c77dff":"#555", border:eukaView===v.id?"1px solid rgba(199,125,255,0.3)":"1px solid transparent", whiteSpace:"nowrap" }}>{v.label}</button>
                     ))}
                   </div>
-                  {/* Refresh button */}
-                  <button
-                    onClick={async ()=>{
-                      const storeId = currentEukaStore.id;
-                      const dateClause = eukaDateFrom||eukaDateTo
-                        ? ` Filter data to the period from ${eukaDateFrom||"the beginning"} to ${eukaDateTo||"today"}.`
-                        : " Use all-time data.";
-                      const fetchEuka = async (isCompare=false) => {
-                        const clause = isCompare
-                          ? (eukaCompareFrom||eukaCompareTo ? ` Filter data to the comparison period from ${eukaCompareFrom||"the beginning"} to ${eukaCompareTo||"today"}.` : dateClause)
-                          : dateClause;
-                        const response = await fetch("https://api.anthropic.com/v1/messages", {
-                          method:"POST",
-                          headers:{ "Content-Type":"application/json" },
-                          body: JSON.stringify({
-                            model:"claude-sonnet-4-20250514",
-                            max_tokens:1000,
-                            mcp_servers:[{ type:"url", url:"https://app.euka.ai/api/mcp", name:"euka-mcp" }],
-                            messages:[{ role:"user", content:`For Euka store ID ${storeId}, query affiliate performance data.${clause} Return ONLY a JSON object (no markdown, no preamble) with this exact structure:
-{
-  "summary": { "totalCreators": number, "creatorsWithGmv": number, "totalGmv": number, "totalVideos": number, "videoHitRate": number, "samplesSent": number, "samplesShipped": number, "shipRate": number },
-  "topCreators": [{ "handle": string, "followers": number, "gmv": number, "videos": number, "hitRate": number, "avgRevPerVideo": number }],
-  "topVideos": [{ "handle": string, "description": string, "product": string, "views": number, "revenue": number, "itemsSold": number, "date": string }],
-  "campaigns": [{ "name": string, "requests": number, "shipped": number, "videos": number, "revenue": number }],
-  "monthlyTrend": [{ "month": string, "videos": number, "gmv": number, "creators": number }]
-}
-Limit arrays to top 25 rows each. Use null for missing values. Return only the JSON.` }]
-                          })
-                        });
-                        const data = await response.json();
-                        const text = data.content?.map(c=>c.text||"").join("") || "";
-                        const clean = text.replace(/```json|```/g,"").trim();
-                        return JSON.parse(clean);
-                      };
-                      setEukaLoading(l=>({...l,[storeId]:true}));
-                      setEukaError(e=>({...e,[storeId]:""}));
-                      try {
-                        const primary = await fetchEuka(false);
-                        setEukaData(prev=>({...prev,[storeId]:primary}));
-                        if (eukaCompareMode && (eukaCompareFrom||eukaCompareTo)) {
-                          const compare = await fetchEuka(true);
-                          setEukaCompareData(prev=>({...prev,[storeId]:compare}));
-                        } else {
-                          setEukaCompareData(prev=>({...prev,[storeId]:null}));
-                        }
-                      } catch(err) {
-                        setEukaError(e=>({...e,[storeId]:"Failed to load Euka data. Check your connection and try again."}));
-                      } finally {
-                        setEukaLoading(l=>({...l,[storeId]:false}));
-                      }
-                    }}
-                    style={{ fontSize:11, fontWeight:700, padding:"7px 16px", borderRadius:7, background:"rgba(199,125,255,0.1)", color:"#c77dff", border:"1px solid rgba(199,125,255,0.25)", cursor:"pointer", display:"flex", alignItems:"center", gap:6 }}>
-                    {eukaLoading[currentEukaStore.id] ? "⟳ Loading..." : "⟳ Refresh"}
-                  </button>
+                  {/* Sync buttons */}
+                  <div style={{ display:"flex", gap:6 }}>
+                    <button
+                      onClick={async ()=>{
+                        const storeId = currentEukaStore.id;
+                        setSbStatus("reading"); setSbError("");
+                        try {
+                          const cached = await readEukaFromSupabase(storeId, eukaDateFrom, eukaDateTo);
+                          if (cached) {
+                            setEukaData(prev=>({...prev,[storeId]:cached}));
+                            setSbStatus("ok");
+                          } else {
+                            setSbError("No cached data for this period — click Sync from Euka first.");
+                            setSbStatus("idle");
+                          }
+                        } catch(e) { setSbError("Read failed: "+e.message); setSbStatus("error"); }
+                      }}
+                      style={{ fontSize:11, fontWeight:700, padding:"7px 12px", borderRadius:7, background:"rgba(0,229,160,0.08)", color:"#00e5a0", border:"1px solid rgba(0,229,160,0.2)", cursor:"pointer" }}>
+                      {sbStatus==="reading"?"⟳ Reading...":"📦 Load Cache"}
+                    </button>
+                    <button
+                      onClick={async ()=>{
+                        const storeId  = currentEukaStore.id;
+                        const storeName= currentEukaStore.name;
+                        const fetchFromEuka = async (from, to) => {
+                          const clause = from||to ? ` Filter data to the period from ${from||"the beginning"} to ${to||"today"}.` : " Use all-time data.";
+                          const response = await fetch("https://api.anthropic.com/v1/messages", {
+                            method:"POST", headers:{"Content-Type":"application/json"},
+                            body: JSON.stringify({
+                              model:"claude-sonnet-4-20250514", max_tokens:1000,
+                              mcp_servers:[{type:"url",url:"https://app.euka.ai/api/mcp",name:"euka-mcp"}],
+                              messages:[{role:"user",content:`For Euka store ID ${storeId}, query affiliate performance data.${clause} Return ONLY a JSON object (no markdown) with this structure: {"summary":{"totalCreators":0,"creatorsWithGmv":0,"totalGmv":0,"totalVideos":0,"videoHitRate":0,"samplesSent":0,"samplesShipped":0,"shipRate":0},"topCreators":[{"handle":"","followers":0,"gmv":0,"videos":0,"hitRate":0,"avgRevPerVideo":0}],"topVideos":[{"handle":"","description":"","product":"","views":0,"revenue":0,"itemsSold":0,"date":""}],"campaigns":[{"name":"","requests":0,"shipped":0,"videos":0,"revenue":0}],"monthlyTrend":[{"month":"","videos":0,"gmv":0,"creators":0}]} Limit arrays to 25 rows. Return only JSON.`}]
+                            })
+                          });
+                          const data = await response.json();
+                          const text = data.content?.map(c=>c.text||"").join("")||"";
+                          return JSON.parse(text.replace(/```json|```/g,"").trim());
+                        };
+                        setEukaLoading(l=>({...l,[storeId]:true}));
+                        setSbStatus("syncing"); setSbError("");
+                        setEukaError(e=>({...e,[storeId]:""}));
+                        try {
+                          const primary = await fetchFromEuka(eukaDateFrom, eukaDateTo);
+                          setEukaData(prev=>({...prev,[storeId]:primary}));
+                          await writeEukaToSupabase(storeId, storeName, primary, eukaDateFrom, eukaDateTo);
+                          if (eukaCompareMode&&(eukaCompareFrom||eukaCompareTo)) {
+                            const compare = await fetchFromEuka(eukaCompareFrom, eukaCompareTo);
+                            setEukaCompareData(prev=>({...prev,[storeId]:compare}));
+                            await writeEukaToSupabase(storeId, storeName, compare, eukaCompareFrom, eukaCompareTo);
+                          }
+                          setSbStatus("ok");
+                        } catch(err) {
+                          setEukaError(e=>({...e,[storeId]:"Sync failed: "+err.message}));
+                          setSbStatus("error");
+                        } finally { setEukaLoading(l=>({...l,[storeId]:false})); }
+                      }}
+                      style={{ fontSize:11, fontWeight:700, padding:"7px 14px", borderRadius:7, background:"rgba(199,125,255,0.1)", color:"#c77dff", border:"1px solid rgba(199,125,255,0.25)", cursor:"pointer" }}>
+                      {eukaLoading[currentEukaStore.id]||sbStatus==="syncing"?"⟳ Syncing...":"⟳ Sync from Euka"}
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -2893,14 +3192,32 @@ Limit arrays to top 25 rows each. Use null for missing values. Return only the J
                       </div>
                     )}
                   </div>
-                  <div style={{ fontSize:10, color:"#444", marginLeft:"auto" }}>Hit Refresh after changing dates to reload data</div>
+                  <div style={{ fontSize:10, color:"#444", marginLeft:"auto" }}>
+                    {sbStatus==="ok"     && <span style={{ color:"#00e5a0" }}>✓ Synced to Supabase</span>}
+                    {sbStatus==="syncing"&& <span style={{ color:"#c77dff" }}>⟳ Syncing to Supabase…</span>}
+                    {sbStatus==="reading"&& <span style={{ color:"#00e5a0" }}>⟳ Reading from Supabase…</span>}
+                    {sbStatus==="error"  && <span style={{ color:"#ff4d6d" }}>⚠ Supabase error</span>}
+                    {sbStatus==="idle"   && <span>Set dates then Sync · or Load Cache for stored data</span>}
+                  </div>
                 </div>
               </div>
 
-              {/* Error */}
-              {eukaError[currentEukaStore.id] && (
+              {/* Supabase error */}
+              {sbError && (
                 <div style={{ padding:"10px 14px", background:"rgba(255,77,109,0.08)", border:"1px solid rgba(255,77,109,0.2)", borderRadius:8, fontSize:11, color:"#ff4d6d", marginBottom:16 }}>
-                  ⚠ {eukaError[currentEukaStore.id]}
+                  ⚠ {sbError}
+                  {sbError.includes("Tables may need") && (
+                    <div style={{ marginTop:8, padding:"10px 12px", background:"rgba(0,0,0,0.3)", borderRadius:6, fontFamily:"monospace", fontSize:10, color:"#aaa", lineHeight:1.8 }}>
+                      Run this SQL in Supabase → SQL Editor to create the tables:<br/>
+                      <span style={{ color:"#00e5a0" }}>
+                        {`create table if not exists affiliate_snapshots (id bigserial primary key, store_id text, store_name text, snapshot_date date, period_from date, period_to date, period_key text, total_creators int, creators_with_gmv int, total_gmv numeric, total_videos int, video_hit_rate numeric, samples_sent int, samples_shipped int, ship_rate numeric, created_at timestamptz default now(), unique(store_id, snapshot_date, period_key));
+create table if not exists affiliate_creators (id bigserial primary key, store_id text, snapshot_date date, period_key text, handle text, followers int, gmv numeric, videos int, hit_rate numeric, avg_rev_per_video numeric);
+create table if not exists affiliate_videos (id bigserial primary key, store_id text, snapshot_date date, period_key text, handle text, description text, product text, views int, revenue numeric, items_sold int, video_date date);
+create table if not exists affiliate_campaigns (id bigserial primary key, store_id text, snapshot_date date, period_key text, campaign_name text, requests int, shipped int, videos int, revenue numeric);
+create table if not exists affiliate_monthly (id bigserial primary key, store_id text, snapshot_date date, period_key text, month text, videos int, gmv numeric, creators int);`}
+                      </span>
+                    </div>
+                  )}
                 </div>
               )}
 
