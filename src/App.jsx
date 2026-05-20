@@ -397,7 +397,13 @@ const CHAN_COLOR={organic:"#00e5a0",paid:"#ff6b35",affiliate:"#c77dff"};
 function BrandDashboard({ brandId, brandName, brandColor, onBack }) {
   const [tab,       setTab]       = useState("overview");
   const [projView,  setProjView]  = useState("weekly");
-  const [profMode,  setProfMode]  = useState("planning");   // "planning" | "actuals"
+  const [profMode,  setProfMode]  = useState("planning");   // "planning" | "actuals" | "trends"
+  const [trendsDateMode,  setTrendsDateMode]  = useState("order");    // "order" | "payout"
+  const [trendsGroupBy,   setTrendsGroupBy]   = useState("month");    // "month" | "week" | "quarter"
+  const [trendsMetric,    setTrendsMetric]    = useState("revenue");  // bar chart metric
+  const [trendsDateFrom,  setTrendsDateFrom]  = useState("");
+  const [trendsDateTo,    setTrendsDateTo]    = useState("");
+  const [trendsCompare,   setTrendsCompare]   = useState(false);
   const [profTab,   setProfTab]   = useState("product");
   const [expandedRow, setExpanded]= useState(null);
   const [fees, setFees] = useState({ tikTokFeePct:DEFAULT_TIKTOK_FEE_PCT, affiliateComPct:DEFAULT_AFFILIATE_COM_PCT, discountPct:DEFAULT_DISCOUNT_PCT });
@@ -3518,12 +3524,12 @@ function BrandDashboard({ brandId, brandName, brandColor, onBack }) {
             {/* Mode toggle */}
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:20 }}>
               <div style={{ display:"flex", gap:0, background:"rgba(255,255,255,0.03)", borderRadius:8, padding:4, border:"1px solid rgba(255,255,255,0.07)" }}>
-                {[{id:"planning",label:"📊 Planning Mode"},{id:"actuals",label:"📋 Actuals Mode"}].map(m=>(
+                {[{id:"planning",label:"📊 Planning"},{id:"actuals",label:"📋 Actuals"},{id:"trends",label:"📈 Trends"}].map(m=>(
                   <button key={m.id} onClick={()=>setProfMode(m.id)} style={{ fontSize:11, fontWeight:700, letterSpacing:1, textTransform:"uppercase", padding:"8px 20px", cursor:"pointer", borderRadius:6, background:profMode===m.id?"rgba(0,229,160,0.12)":"none", color:profMode===m.id?"#00e5a0":"#555", border:profMode===m.id?"1px solid rgba(0,229,160,0.3)":"1px solid transparent" }}>{m.label}</button>
                 ))}
               </div>
               <div style={{ fontSize:11, color:"#555" }}>
-                {profMode==="planning" ? "Model scenarios with adjustable fees & COGS" : `${orders.length} orders loaded · ${[...new Set(orders.map(o=>o.product))].length} products`}
+                {profMode==="planning" ? "Model scenarios with adjustable fees & COGS" : profMode==="actuals" ? `${orders.length} orders loaded · ${[...new Set(orders.map(o=>o.product))].length} products` : "Month-over-month P&L from imported orders"}
               </div>
             </div>
 
@@ -3776,10 +3782,266 @@ function BrandDashboard({ brandId, brandName, brandColor, onBack }) {
                 )}
               </div>
             )}
+            {/* ─── TRENDS MODE ─── */}
+            {profMode==="trends" && (()=>{
+
+              // ── Parse date from order ──────────────────────────────────────
+              const parseOrderDate = (o) => {
+                const raw = trendsDateMode==="order"
+                  ? (o.date||o.createdAt||o.created||"")
+                  : (o.payoutDate||o.settlementDate||o.date||"");
+                if (!raw) return null;
+                const d = new Date(raw.toString().replace(/\\t/g,"").trim());
+                return isNaN(d) ? null : d;
+              };
+
+              const fmtPeriod = (d, groupBy) => {
+                if (!d) return "Unknown";
+                if (groupBy==="week") {
+                  const jan1 = new Date(d.getFullYear(),0,1);
+                  const wk = Math.ceil(((d-jan1)/86400000+jan1.getDay()+1)/7);
+                  return d.getFullYear()+"-W"+String(wk).padStart(2,"0");
+                }
+                if (groupBy==="quarter") {
+                  const q = Math.floor(d.getMonth()/3)+1;
+                  return d.getFullYear()+" Q"+q;
+                }
+                return d.toLocaleString("en-US",{month:"short",year:"numeric"});
+              };
+
+              // ── Filter by date range ───────────────────────────────────────
+              const filtered = orders.filter(o=>{
+                const d = parseOrderDate(o);
+                if (!d) return true;
+                if (trendsDateFrom && d < new Date(trendsDateFrom)) return false;
+                if (trendsDateTo   && d > new Date(trendsDateTo))   return false;
+                return true;
+              });
+
+              // ── Group orders into periods ──────────────────────────────────
+              const periodMap = {};
+              filtered.forEach(o=>{
+                const d      = parseOrderDate(o);
+                const period = fmtPeriod(d, trendsGroupBy);
+                if (!periodMap[period]) periodMap[period] = {
+                  period, orders:0, revenue:0, platformFees:0,
+                  affiliateCom:0, sellerDisc:0, shipping:0, cogs:0,
+                  adSpend:0, netProfit:0, sortKey: d?.getTime()||0,
+                };
+                const p = periodMap[period];
+                const rev   = o.salePrice||o.orderAmount||o.subtotalAfterDiscount||0;
+                const fee   = o.tikTokFee||o.platformFee||o.platformDisc||0;
+                const aff   = o.affiliateCom||o.affiliateCommission||0;
+                const disc  = o.discount||o.sellerDisc||0;
+                const ship  = o.shipping||o.shippingFee||0;
+                const cogs  = o.cogs||0;
+                const spend = o.adSpend||0;
+                p.orders++;
+                p.revenue     += rev;
+                p.platformFees+= fee;
+                p.affiliateCom+= aff;
+                p.sellerDisc  += disc;
+                p.shipping    += ship;
+                p.cogs        += cogs;
+                p.adSpend     += spend;
+                p.netProfit   += rev-fee-aff-disc-ship-cogs-spend;
+              });
+
+              const periods = Object.values(periodMap).sort((a,b)=>a.sortKey-b.sortKey);
+
+              // Add computed fields
+              periods.forEach(p=>{
+                p.grossMargin   = p.revenue>0 ? r2((p.revenue-p.cogs)/p.revenue*100) : 0;
+                p.netMargin     = p.revenue>0 ? r2(p.netProfit/p.revenue*100) : 0;
+                p.aov           = p.orders>0  ? r2(p.revenue/p.orders) : 0;
+                p.totalDeduct   = p.platformFees+p.affiliateCom+p.sellerDisc+p.shipping+p.cogs+p.adSpend;
+              });
+
+              const maxBar = Math.max(...periods.map(p=>p[trendsMetric]||0), 1);
+
+              const METRICS = [
+                { id:"revenue",      label:"Revenue",          color:"#00e5a0" },
+                { id:"netProfit",    label:"Net Profit",        color:"#c77dff" },
+                { id:"platformFees", label:"Platform Fees",     color:"#f5c518" },
+                { id:"affiliateCom", label:"Affiliate Comm",    color:"#ff6b35" },
+                { id:"cogs",         label:"COGS",              color:"#ff4d6d" },
+                { id:"adSpend",      label:"Ad Spend",          color:"#aaa"    },
+                { id:"aov",          label:"AOV",               color:"#fff"    },
+              ];
+
+              const activeMeta = METRICS.find(m=>m.id===trendsMetric)||METRICS[0];
+
+              return (
+                <div>
+                  {/* Controls bar */}
+                  <div style={{ ...S.card, marginBottom:16, padding:"14px 18px" }}>
+                    <div style={{ display:"flex", gap:20, flexWrap:"wrap", alignItems:"center" }}>
+
+                      {/* Date mode toggle */}
+                      <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                        <span style={{ fontSize:10, color:"#555", whiteSpace:"nowrap" }}>Date by:</span>
+                        {["order","payout"].map(m=>(
+                          <button key={m} onClick={()=>setTrendsDateMode(m)} style={{ fontSize:10, fontWeight:700, padding:"3px 10px", borderRadius:20, cursor:"pointer", background:trendsDateMode===m?"rgba(0,229,160,0.12)":"transparent", color:trendsDateMode===m?"#00e5a0":"#555", border:`1px solid ${trendsDateMode===m?"rgba(0,229,160,0.3)":"rgba(255,255,255,0.08)"}`, textTransform:"capitalize" }}>{m==="order"?"Order Date":"Payout Date"}</button>
+                        ))}
+                      </div>
+
+                      {/* Group by */}
+                      <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                        <span style={{ fontSize:10, color:"#555", whiteSpace:"nowrap" }}>Group by:</span>
+                        {["week","month","quarter"].map(g=>(
+                          <button key={g} onClick={()=>setTrendsGroupBy(g)} style={{ fontSize:10, fontWeight:700, padding:"3px 10px", borderRadius:20, cursor:"pointer", background:trendsGroupBy===g?"rgba(199,125,255,0.12)":"transparent", color:trendsGroupBy===g?"#c77dff":"#555", border:`1px solid ${trendsGroupBy===g?"rgba(199,125,255,0.3)":"rgba(255,255,255,0.08)"}`, textTransform:"capitalize" }}>{g}</button>
+                        ))}
+                      </div>
+
+                      {/* Custom date range */}
+                      <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                        <span style={{ fontSize:10, color:"#555", whiteSpace:"nowrap" }}>From:</span>
+                        <input type="date" value={trendsDateFrom} onChange={e=>setTrendsDateFrom(e.target.value)} style={{ background:"rgba(255,255,255,0.06)", border:"1px solid rgba(255,255,255,0.12)", borderRadius:6, padding:"3px 8px", color:"#e8e8f0", fontFamily:"inherit", fontSize:11, outline:"none" }}/>
+                        <span style={{ fontSize:10, color:"#555" }}>To:</span>
+                        <input type="date" value={trendsDateTo} onChange={e=>setTrendsDateTo(e.target.value)} style={{ background:"rgba(255,255,255,0.06)", border:"1px solid rgba(255,255,255,0.12)", borderRadius:6, padding:"3px 8px", color:"#e8e8f0", fontFamily:"inherit", fontSize:11, outline:"none" }}/>
+                        {(trendsDateFrom||trendsDateTo) && <button onClick={()=>{ setTrendsDateFrom(""); setTrendsDateTo(""); }} style={{ fontSize:10, color:"#ff4d6d", background:"transparent", border:"none", cursor:"pointer" }}>✕ Clear</button>}
+                      </div>
+
+                      <div style={{ marginLeft:"auto", fontSize:10, color:"#555" }}>
+                        {periods.length} period{periods.length!==1?"s":""} · {filtered.length} orders
+                        {(trendsDateFrom||trendsDateTo) && <span style={{ color:"#f5c518", marginLeft:6 }}>· date filtered</span>}
+                      </div>
+                    </div>
+                  </div>
+
+                  {periods.length===0 ? (
+                    <div style={{ ...S.card, textAlign:"center", padding:"48px 0", color:"#555", fontSize:12 }}>
+                      No order data yet — import your TikTok and Shopify order exports in the Data Import tab first.<br/>
+                      <span style={{ fontSize:11, color:"#444", marginTop:8, display:"block" }}>Once imported, orders accumulate here by period automatically.</span>
+                    </div>
+                  ) : (
+                    <div>
+                      {/* Summary KPIs across all selected periods */}
+                      <div style={{ display:"grid", gridTemplateColumns:"repeat(6,1fr)", gap:12, marginBottom:20 }}>
+                        {[
+                          ["Total Revenue",   "$"+(periods.reduce((s,p)=>s+p.revenue,0)/1000).toFixed(1)+"k",    "#fff"    ],
+                          ["Total Orders",    periods.reduce((s,p)=>s+p.orders,0),                                "#aaa"    ],
+                          ["Avg AOV",         "$"+r2(periods.reduce((s,p)=>s+p.revenue,0)/Math.max(periods.reduce((s,p)=>s+p.orders,0),1)), "#e8e8f0"],
+                          ["Platform Fees",   "$"+(periods.reduce((s,p)=>s+p.platformFees,0)/1000).toFixed(1)+"k","#f5c518" ],
+                          ["Affiliate Comm",  "$"+(periods.reduce((s,p)=>s+p.affiliateCom,0)/1000).toFixed(1)+"k","#c77dff" ],
+                          ["Net Profit",      "$"+(periods.reduce((s,p)=>s+p.netProfit,0)/1000).toFixed(1)+"k",  periods.reduce((s,p)=>s+p.netProfit,0)>=0?"#00e5a0":"#ff4d6d"],
+                        ].map(([k,v,c])=>(
+                          <div key={k} style={{ ...S.card, textAlign:"center", padding:"12px 10px" }}>
+                            <div style={{ fontSize:8, color:"#444", letterSpacing:1.5, textTransform:"uppercase", fontWeight:700, marginBottom:6 }}>{k}</div>
+                            <div style={{ fontSize:18, fontWeight:700, color:c }}>{v}</div>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Bar chart */}
+                      <div style={{ ...S.card, marginBottom:16 }}>
+                        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+                          <div style={{ fontSize:9, letterSpacing:2, textTransform:"uppercase", color:"#444", fontWeight:700 }}>
+                            {activeMeta.label} by {trendsGroupBy.charAt(0).toUpperCase()+trendsGroupBy.slice(1)}
+                          </div>
+                          <div style={{ display:"flex", gap:6 }}>
+                            {METRICS.map(m=>(
+                              <button key={m.id} onClick={()=>setTrendsMetric(m.id)} style={{ fontSize:9, fontWeight:700, padding:"2px 8px", borderRadius:20, cursor:"pointer", background:trendsMetric===m.id?m.color+"20":"transparent", color:trendsMetric===m.id?m.color:"#555", border:`1px solid ${trendsMetric===m.id?m.color+"44":"rgba(255,255,255,0.07)"}` }}>{m.label}</button>
+                            ))}
+                          </div>
+                        </div>
+                        <div style={{ display:"flex", alignItems:"flex-end", gap:6, height:160, paddingBottom:4 }}>
+                          {periods.map((p,i)=>{
+                            const val = p[trendsMetric]||0;
+                            const barH = Math.max((val/maxBar)*140, val>0?4:0);
+                            const isNeg = val<0;
+                            return (
+                              <div key={i} style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", gap:4, minWidth:0 }}>
+                                <div style={{ fontSize:8, color:activeMeta.color, fontWeight:700, textAlign:"center", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", maxWidth:"100%" }}>
+                                  {Math.abs(val)>=1000?"$"+(val/1000).toFixed(1)+"k":val>0?"$"+val.toFixed(0):"—"}
+                                </div>
+                                <div style={{ width:"100%", height:barH, background:isNeg?"#ff4d6d":activeMeta.color, borderRadius:"3px 3px 0 0", minHeight:val!==0?4:0, opacity:0.85 }}/>
+                                <div style={{ fontSize:8, color:"#444", textAlign:"center", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", maxWidth:"100%", transform:"rotate(-30deg)", transformOrigin:"top center", marginTop:4 }}>{p.period}</div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* Full period table — waterfall columns */}
+                      <div style={{ ...S.card, overflowX:"auto" }}>
+                        <div style={{ fontSize:9, letterSpacing:2, textTransform:"uppercase", color:"#444", fontWeight:700, marginBottom:16 }}>
+                          Full P&L by Period
+                        </div>
+                        <table style={{ width:"100%", borderCollapse:"collapse", fontSize:11, minWidth:900 }}>
+                          <thead>
+                            <tr>
+                              {["Period","Orders","Revenue","− Platform Fee","− Affiliate","− Seller Disc","− Shipping","− COGS","− Ad Spend","Net Profit","Net Margin","AOV"].map(h=>(
+                                <th key={h} style={{ ...S.th, fontSize:8, whiteSpace:"nowrap", paddingBottom:10 }}>{h}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {periods.map((p,i)=>{
+                              const isEven = i%2===0;
+                              return (
+                                <tr key={i} style={{ background:isEven?"rgba(255,255,255,0.01)":"transparent" }}>
+                                  <td style={{ ...S.td, fontWeight:700, whiteSpace:"nowrap", color:"#e8e8f0" }}>{p.period}</td>
+                                  <td style={S.td}><span style={{ color:"#aaa" }}>{p.orders}</span></td>
+                                  <td style={S.td}><span style={{ fontWeight:700 }}>${(p.revenue/1000).toFixed(1)}k</span></td>
+                                  <td style={S.td}><span style={{ color:"#f5c518" }}>-${(p.platformFees/1000).toFixed(1)}k</span></td>
+                                  <td style={S.td}><span style={{ color:"#c77dff" }}>-${(p.affiliateCom/1000).toFixed(1)}k</span></td>
+                                  <td style={S.td}><span style={{ color:"#aaa" }}>-${(p.sellerDisc/1000).toFixed(1)}k</span></td>
+                                  <td style={S.td}><span style={{ color:"#ff4d6d" }}>-${(p.shipping/1000).toFixed(1)}k</span></td>
+                                  <td style={S.td}><span style={{ color:"#ff4d6d" }}>-${(p.cogs/1000).toFixed(1)}k</span></td>
+                                  <td style={S.td}><span style={{ color:"#ff6b35" }}>-${(p.adSpend/1000).toFixed(1)}k</span></td>
+                                  <td style={S.td}><span style={{ fontWeight:700, color:p.netProfit>=0?"#00e5a0":"#ff4d6d" }}>${(p.netProfit/1000).toFixed(1)}k</span></td>
+                                  <td style={S.td}><ProfitPill pct={p.netMargin}/></td>
+                                  <td style={S.td}><span style={{ color:"#fff" }}>${p.aov}</span></td>
+                                </tr>
+                              );
+                            })}
+                            {/* Totals row */}
+                            <tr style={{ background:"rgba(255,255,255,0.04)", borderTop:"1px solid rgba(255,255,255,0.08)" }}>
+                              <td style={{ ...S.td, fontWeight:700, color:"#fff" }}>TOTAL</td>
+                              <td style={{ ...S.td, fontWeight:700 }}>{periods.reduce((s,p)=>s+p.orders,0)}</td>
+                              <td style={{ ...S.td, fontWeight:700 }}>${(periods.reduce((s,p)=>s+p.revenue,0)/1000).toFixed(1)}k</td>
+                              <td style={{ ...S.td, color:"#f5c518", fontWeight:700 }}>-${(periods.reduce((s,p)=>s+p.platformFees,0)/1000).toFixed(1)}k</td>
+                              <td style={{ ...S.td, color:"#c77dff", fontWeight:700 }}>-${(periods.reduce((s,p)=>s+p.affiliateCom,0)/1000).toFixed(1)}k</td>
+                              <td style={{ ...S.td, color:"#aaa", fontWeight:700 }}>-${(periods.reduce((s,p)=>s+p.sellerDisc,0)/1000).toFixed(1)}k</td>
+                              <td style={{ ...S.td, color:"#ff4d6d", fontWeight:700 }}>-${(periods.reduce((s,p)=>s+p.shipping,0)/1000).toFixed(1)}k</td>
+                              <td style={{ ...S.td, color:"#ff4d6d", fontWeight:700 }}>-${(periods.reduce((s,p)=>s+p.cogs,0)/1000).toFixed(1)}k</td>
+                              <td style={{ ...S.td, color:"#ff6b35", fontWeight:700 }}>-${(periods.reduce((s,p)=>s+p.adSpend,0)/1000).toFixed(1)}k</td>
+                              <td style={{ ...S.td, fontWeight:700, color:periods.reduce((s,p)=>s+p.netProfit,0)>=0?"#00e5a0":"#ff4d6d" }}>${(periods.reduce((s,p)=>s+p.netProfit,0)/1000).toFixed(1)}k</td>
+                              <td style={S.td}><ProfitPill pct={r2(periods.reduce((s,p)=>s+p.netProfit,0)/Math.max(periods.reduce((s,p)=>s+p.revenue,0),1)*100)}/></td>
+                              <td style={{ ...S.td, color:"#fff", fontWeight:700 }}>${r2(periods.reduce((s,p)=>s+p.revenue,0)/Math.max(periods.reduce((s,p)=>s+p.orders,0),1))}</td>
+                            </tr>
+                          </tbody>
+                        </table>
+
+                        {/* WoW / MoM delta row */}
+                        {periods.length>1 && (
+                          <div style={{ marginTop:20 }}>
+                            <div style={{ fontSize:9, letterSpacing:2, textTransform:"uppercase", color:"#444", fontWeight:700, marginBottom:12 }}>Period-over-Period Revenue Change</div>
+                            <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
+                              {periods.slice(1).map((p,i)=>{
+                                const prev = periods[i];
+                                const delta = prev.revenue>0 ? r2((p.revenue-prev.revenue)/prev.revenue*100) : 0;
+                                const isPos = delta>=0;
+                                return (
+                                  <div key={i} style={{ padding:"8px 14px", background:isPos?"rgba(0,229,160,0.06)":"rgba(255,77,109,0.06)", borderRadius:8, border:`1px solid ${isPos?"rgba(0,229,160,0.15)":"rgba(255,77,109,0.15)"}` }}>
+                                    <div style={{ fontSize:9, color:"#555", marginBottom:3 }}>{prev.period} → {p.period}</div>
+                                    <div style={{ fontSize:14, fontWeight:700, color:isPos?"#00e5a0":"#ff4d6d" }}>{isPos?"+":""}{delta}%</div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
           </div>
         )}
-
-        {/* ── INVENTORY ── */}
         {tab==="inventory" && (
           <div>
 
@@ -5185,35 +5447,50 @@ function BrandDashboard({ brandId, brandName, brandColor, onBack }) {
 }
 
 // ─── PORTFOLIO WRAPPER (default export) ───────────────────────────────────────
-const BRAND_COLORS = ["linear-gradient(135deg,#ff0050,#00e5a0)","linear-gradient(135deg,#c77dff,#ff6b35)","linear-gradient(135deg,#00e5a0,#0077ff)","linear-gradient(135deg,#f5c518,#ff4d6d)","linear-gradient(135deg,#ff6b35,#c77dff)","linear-gradient(135deg,#0077ff,#f5c518)"];
-const BRAND_ACCENT = ["#00e5a0","#c77dff","#0077ff","#f5c518","#ff6b35","#ff4d6d"];
+const BRAND_COLORS = ["linear-gradient(135deg,#ff0050,#00e5a0)","linear-gradient(135deg,#c77dff,#ff6b35)","linear-gradient(135deg,#00e5a0,#0077ff)","linear-gradient(135deg,#f5c518,#ff4d6d)","linear-gradient(135deg,#ff6b35,#c77dff)","linear-gradient(135deg,#0077ff,#f5c518)","linear-gradient(135deg,#00e5a0,#f5c518)"];
+const BRAND_ACCENT = ["#00e5a0","#c77dff","#0077ff","#f5c518","#ff6b35","#ff4d6d","#00c4ff"];
 
-const MOCK_BRANDS = [
-  { id:"b1", name:"Glow Lab Beauty", niche:"Skincare / Serums",  revenue:187400, roas:3.2, adSpend:8200, margin:34, stockAlerts:1, commRate:18, followers:284000 },
-  { id:"b2", name:"PureGlow Co",     niche:"Clean Beauty / SPF", revenue:94200,  roas:2.8, adSpend:5100, margin:28, stockAlerts:0, commRate:15, followers:142000 },
-  { id:"b3", name:"DermLux",         niche:"Clinical Skincare",  revenue:52000,  roas:2.1, adSpend:3200, margin:22, stockAlerts:2, commRate:10, followers:67000  },
+const REAL_BRANDS = [
+  { id:"heritage",  name:"Heritage Store",      niche:"Beauty / Skincare",              revenue:0, roas:0, adSpend:0, margin:0, stockAlerts:0, commRate:18, followers:0, status:"active"  },
+  { id:"solaray",   name:"Solaray",             niche:"Health / Vitamins & Supplements", revenue:0, roas:0, adSpend:0, margin:0, stockAlerts:0, commRate:15, followers:0, status:"active"  },
+  { id:"lifeflo",   name:"Life-Flo",            niche:"Beauty / Skincare",              revenue:0, roas:0, adSpend:0, margin:0, stockAlerts:0, commRate:16, followers:0, status:"active"  },
+  { id:"kal",       name:"Kal Vitamins",        niche:"Health / Vitamins & Supplements", revenue:0, roas:0, adSpend:0, margin:0, stockAlerts:0, commRate:14, followers:0, status:"active"  },
+  { id:"zhou",      name:"Zhou Nutrition",      niche:"Health / Vitamins & Supplements", revenue:0, roas:0, adSpend:0, margin:0, stockAlerts:0, commRate:15, followers:0, status:"active"  },
+  { id:"revice",    name:"Revice",              niche:"Fashion / Denim",                revenue:0, roas:0, adSpend:0, margin:0, stockAlerts:0, commRate:20, followers:0, status:"active"  },
+  { id:"kut",       name:"Kut From The Kloth",  niche:"Fashion / Denim",                revenue:0, roas:0, adSpend:0, margin:0, stockAlerts:0, commRate:20, followers:0, status:"pending" },
 ];
 
 export default function Portfolio() {
   const [activeBrand,   setActiveBrand]   = useState(null);
   const [portfolioView, setPortfolioView] = useState("home");
-  const [brands,        setBrands]        = useState(MOCK_BRANDS);
+  const [brands,        setBrands]        = useState(REAL_BRANDS);
+  const [selectedBrands,setSelectedBrands]= useState(REAL_BRANDS.filter(b=>b.status==="active").map(b=>b.id));
+  const [showSelector,  setShowSelector]  = useState(false);
   const [addingBrand,   setAddingBrand]   = useState(false);
-  const [newBrand,      setNewBrand]      = useState({ name:"", niche:"", revenue:0, roas:0, adSpend:0, margin:0, stockAlerts:0, commRate:18, followers:0 });
+  const [newBrand,      setNewBrand]      = useState({ name:"", niche:"", revenue:0, roas:0, adSpend:0, margin:0, stockAlerts:0, commRate:18, followers:0, status:"active" });
+
+  const toggleBrandSelected = (id) => setSelectedBrands(prev=>prev.includes(id)?prev.filter(x=>x!==id):[...prev,id]);
+  const selectAllBrands     = () => setSelectedBrands(brands.map(b=>b.id));
+  const clearAllBrands      = () => setSelectedBrands([]);
 
   const saveBrand = () => {
     if (!newBrand.name.trim()) return;
-    setBrands(prev=>[...prev, { ...newBrand, id:"b_"+Date.now() }]);
-    setNewBrand({ name:"", niche:"", revenue:0, roas:0, adSpend:0, margin:0, stockAlerts:0, commRate:18, followers:0 });
+    const id = "b_"+Date.now();
+    setBrands(prev=>[...prev, { ...newBrand, id }]);
+    setSelectedBrands(prev=>[...prev, id]);
+    setNewBrand({ name:"", niche:"", revenue:0, roas:0, adSpend:0, margin:0, stockAlerts:0, commRate:18, followers:0, status:"active" });
     setAddingBrand(false);
   };
 
-  const totalRev    = brands.reduce((s,b)=>s+b.revenue,0);
-  const totalSpend  = brands.reduce((s,b)=>s+b.adSpend,0);
-  const blendedROAS = totalSpend>0 ? r2(totalRev/totalSpend) : 0;
-  const avgMargin   = brands.length ? r2(brands.reduce((s,b)=>s+b.margin,0)/brands.length) : 0;
-  const totalAlerts = brands.reduce((s,b)=>s+b.stockAlerts,0);
-  const maxRev      = Math.max(...brands.map(b=>b.revenue),1);
+  // Only include selected brands in portfolio KPIs
+  const activeBrands  = brands.filter(b=>selectedBrands.includes(b.id));
+  const totalRev      = activeBrands.reduce((s,b)=>s+b.revenue,0);
+  const totalSpend    = activeBrands.reduce((s,b)=>s+b.adSpend,0);
+  const blendedROAS   = totalSpend>0 ? r2(totalRev/totalSpend) : 0;
+  const avgMargin     = activeBrands.length ? r2(activeBrands.reduce((s,b)=>s+b.margin,0)/activeBrands.length) : 0;
+  const totalAlerts   = activeBrands.reduce((s,b)=>s+b.stockAlerts,0);
+  const maxRev        = Math.max(...brands.map(b=>b.revenue),1);
+  const allSelected   = selectedBrands.length===brands.length;
 
   if (activeBrand) {
     const b = brands.find(b=>b.id===activeBrand);
@@ -5231,7 +5508,7 @@ export default function Portfolio() {
           <div style={{ width:32, height:32, background:"linear-gradient(135deg,#ff0050,#00e5a0)", borderRadius:8, display:"flex", alignItems:"center", justifyContent:"center", fontSize:16 }}>⚡</div>
           <div>
             <div style={{ fontSize:14, fontWeight:700, letterSpacing:2, textTransform:"uppercase", color:"#fff" }}>Shop Pulse</div>
-            <div style={{ fontSize:10, color:"#444" }}>Portfolio · {brands.length} brand{brands.length!==1?"s":""}</div>
+            <div style={{ fontSize:10, color:"#444" }}>Portfolio · {brands.length} brands · {selectedBrands.length} in view</div>
           </div>
         </div>
         <div style={{ display:"flex", gap:8 }}>
@@ -5244,16 +5521,55 @@ export default function Portfolio() {
         </div>
       </div>
 
-      <div style={{ padding:"24px 28px", maxWidth:1140 }}>
+      <div style={{ padding:"24px 28px", maxWidth:1200 }}>
 
-        {/* KPI strip */}
+        {/* Brand selector toggle */}
+        <div style={{ marginBottom:20 }}>
+          <button onClick={()=>setShowSelector(o=>!o)} style={{ fontSize:11, fontWeight:700, padding:"7px 16px", borderRadius:7, cursor:"pointer", background:showSelector?"rgba(0,229,160,0.1)":"rgba(255,255,255,0.04)", color:showSelector?"#00e5a0":"#555", border:showSelector?"1px solid rgba(0,229,160,0.3)":"1px solid rgba(255,255,255,0.08)", display:"flex", alignItems:"center", gap:8 }}>
+            {showSelector?"▲":"▼"} Filter Portfolio View
+            {!allSelected && <span style={{ background:"#00e5a0", color:"#000", borderRadius:20, padding:"1px 7px", fontSize:9, fontWeight:700 }}>{selectedBrands.length} of {brands.length}</span>}
+          </button>
+
+          {showSelector && (
+            <div style={{ marginTop:10, padding:"16px 18px", background:"rgba(255,255,255,0.03)", border:"1px solid rgba(255,255,255,0.07)", borderRadius:10 }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
+                <div style={{ fontSize:9, letterSpacing:2, textTransform:"uppercase", color:"#444", fontWeight:700 }}>Include in Portfolio Analytics</div>
+                <div style={{ display:"flex", gap:8 }}>
+                  <button onClick={selectAllBrands} style={{ fontSize:10, padding:"3px 10px", borderRadius:5, cursor:"pointer", background:"rgba(0,229,160,0.08)", color:"#00e5a0", border:"1px solid rgba(0,229,160,0.2)" }}>Select all</button>
+                  <button onClick={clearAllBrands}  style={{ fontSize:10, padding:"3px 10px", borderRadius:5, cursor:"pointer", background:"transparent", color:"#555", border:"1px solid rgba(255,255,255,0.08)" }}>Clear all</button>
+                </div>
+              </div>
+              <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
+                {brands.map((brand,idx)=>{
+                  const accent  = BRAND_ACCENT[idx%BRAND_ACCENT.length];
+                  const checked = selectedBrands.includes(brand.id);
+                  const isPending = brand.status==="pending";
+                  return (
+                    <div key={brand.id} onClick={()=>!isPending&&toggleBrandSelected(brand.id)} style={{ display:"flex", alignItems:"center", gap:8, padding:"8px 14px", borderRadius:8, cursor:isPending?"not-allowed":"pointer", background:checked?`${accent}10`:"rgba(255,255,255,0.03)", border:`1px solid ${checked?accent+"44":"rgba(255,255,255,0.07)"}`, opacity:isPending?0.45:1 }}>
+                      <div style={{ width:16, height:16, borderRadius:4, border:`2px solid ${checked?accent:"rgba(255,255,255,0.2)"}`, background:checked?accent:"transparent", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
+                        {checked && <span style={{ fontSize:9, color:"#000", fontWeight:900 }}>✓</span>}
+                      </div>
+                      <div>
+                        <div style={{ fontSize:11, fontWeight:700, color:checked?accent:"#888" }}>{brand.name}</div>
+                        <div style={{ fontSize:9, color:"#444" }}>{isPending?"Data coming soon":brand.niche}</div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div style={{ fontSize:10, color:"#444", marginTop:10 }}>Portfolio GMV, ROAS, and margin above reflect only the checked brands.</div>
+            </div>
+          )}
+        </div>
+
+        {/* KPI strip — reflects only selected brands */}
         <div style={{ display:"grid", gridTemplateColumns:"repeat(5,1fr)", gap:12, marginBottom:28 }}>
           {[
-            { lbl:"Portfolio GMV",  val:"$"+(totalRev/1000).toFixed(0)+"k",   sub:brands.length+" brands",      c:"#fff"    },
-            { lbl:"Total Ad Spend", val:"$"+(totalSpend/1000).toFixed(1)+"k", sub:"Across all brands",          c:"#ff6b35" },
-            { lbl:"Blended ROAS",   val:blendedROAS>0?blendedROAS+"x":"—",    sub:"Portfolio average",          c:blendedROAS>=2.5?"#00e5a0":blendedROAS>=1.5?"#f5c518":"#ff4d6d" },
-            { lbl:"Avg Margin",     val:avgMargin>0?avgMargin+"%":"—",         sub:"Across all brands",          c:avgMargin>=25?"#00e5a0":avgMargin>=15?"#f5c518":"#ff4d6d" },
-            { lbl:"Stock Alerts",   val:totalAlerts>0?totalAlerts+" alerts":"All OK", sub:totalAlerts>0?"Needs attention":"No urgent issues", c:totalAlerts>0?"#ff4d6d":"#00e5a0" },
+            { lbl:"Portfolio GMV",  val: activeBrands.length>0&&totalRev>0 ? "$"+(totalRev/1000).toFixed(0)+"k" : "No data yet",  sub: selectedBrands.length===brands.length ? brands.length+" brands" : selectedBrands.length+" of "+brands.length+" brands", c:"#fff"    },
+            { lbl:"Total Ad Spend", val: totalSpend>0?"$"+(totalSpend/1000).toFixed(1)+"k":"—", sub:"Across selected brands", c:"#ff6b35" },
+            { lbl:"Blended ROAS",   val: blendedROAS>0?blendedROAS+"x":"—", sub:"Portfolio average", c:blendedROAS>=2.5?"#00e5a0":blendedROAS>=1.5?"#f5c518":blendedROAS>0?"#ff4d6d":"#555" },
+            { lbl:"Avg Margin",     val: avgMargin>0?avgMargin+"%":"—", sub:"Across selected brands", c:avgMargin>=25?"#00e5a0":avgMargin>=15?"#f5c518":avgMargin>0?"#ff4d6d":"#555" },
+            { lbl:"Stock Alerts",   val: totalAlerts>0?totalAlerts+" alerts":"All OK", sub:totalAlerts>0?"Needs attention":"No urgent issues", c:totalAlerts>0?"#ff4d6d":"#00e5a0" },
           ].map((m,i)=>(
             <div key={i} style={{ background:"rgba(255,255,255,0.03)", border:"1px solid rgba(255,255,255,0.07)", borderRadius:12, padding:"16px 18px" }}>
               <div style={{ fontSize:9, letterSpacing:1.5, textTransform:"uppercase", color:"#444", fontWeight:700, marginBottom:8 }}>{m.lbl}</div>
@@ -5285,62 +5601,76 @@ export default function Portfolio() {
 
         {/* ── OVERVIEW ── */}
         {portfolioView==="home" && (
-          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(320px,1fr))", gap:16 }}>
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))", gap:16 }}>
             {brands.map((brand,idx)=>{
-              const accent   = BRAND_ACCENT[idx%BRAND_ACCENT.length];
-              const gradient = BRAND_COLORS[idx%BRAND_COLORS.length];
-              const revShare = r2(brand.revenue/totalRev*100);
-              const flags    = [];
-              if (brand.stockAlerts>0) flags.push({ color:"#ff4d6d", text:brand.stockAlerts+" stock alert"+(brand.stockAlerts!==1?"s":"") });
-              if (brand.roas<2)        flags.push({ color:"#ff4d6d", text:`ROAS ${brand.roas}x — below threshold` });
-              if (brand.roas>=3.5)     flags.push({ color:"#00e5a0", text:`ROAS ${brand.roas}x — scale opportunity` });
-              if (brand.margin<15)     flags.push({ color:"#f5c518", text:`Margin ${brand.margin}% — review costs` });
+              const accent    = BRAND_ACCENT[idx%BRAND_ACCENT.length];
+              const gradient  = BRAND_COLORS[idx%BRAND_COLORS.length];
+              const revShare  = totalRev>0 ? r2(brand.revenue/totalRev*100) : 0;
+              const isPending = brand.status==="pending";
+              const isSelected= selectedBrands.includes(brand.id);
+              const flags = [];
+              if (brand.stockAlerts>0)              flags.push({ color:"#ff4d6d", text:brand.stockAlerts+" stock alert"+(brand.stockAlerts!==1?"s":"") });
+              if (brand.roas>0&&brand.roas<2)        flags.push({ color:"#ff4d6d", text:`ROAS ${brand.roas}x — below threshold` });
+              if (brand.roas>=3.5)                   flags.push({ color:"#00e5a0", text:`ROAS ${brand.roas}x — scale opportunity` });
+              if (brand.margin>0&&brand.margin<15)   flags.push({ color:"#f5c518", text:`Margin ${brand.margin}% — review costs` });
               return (
-                <div key={brand.id} style={{ background:"rgba(255,255,255,0.03)", border:`1px solid ${accent}22`, borderRadius:14, overflow:"hidden" }}>
-                  <div style={{ background:gradient, padding:"14px 18px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                <div key={brand.id} style={{ background:"rgba(255,255,255,0.03)", border:`1px solid ${isSelected?accent+"44":"rgba(255,255,255,0.06)"}`, borderRadius:14, overflow:"hidden", opacity:isPending?0.55:1, transition:"border-color 0.2s, opacity 0.2s" }}>
+                  {/* Brand header */}
+                  <div style={{ background:isPending?"rgba(255,255,255,0.04)":gradient, padding:"14px 18px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
                     <div>
-                      <div style={{ fontSize:14, fontWeight:700, color:"#fff", marginBottom:2 }}>{brand.name}</div>
-                      <div style={{ fontSize:10, color:"rgba(255,255,255,0.6)" }}>{brand.niche}</div>
+                      <div style={{ fontSize:14, fontWeight:700, color:isPending?"#555":"#fff", marginBottom:2 }}>{brand.name}</div>
+                      <div style={{ fontSize:10, color:isPending?"#333":"rgba(255,255,255,0.6)" }}>{brand.niche}</div>
                     </div>
-                    <div style={{ textAlign:"right" }}>
-                      <div style={{ fontSize:10, color:"rgba(255,255,255,0.6)", marginBottom:2 }}>Followers</div>
-                      <div style={{ fontSize:13, fontWeight:700, color:"#fff" }}>{brand.followers>0?(brand.followers/1000).toFixed(0)+"K":"—"}</div>
-                    </div>
+                    {isPending
+                      ? <span style={{ fontSize:9, fontWeight:700, color:"#444", background:"rgba(255,255,255,0.04)", padding:"3px 9px", borderRadius:20, border:"1px solid rgba(255,255,255,0.06)" }}>Coming Soon</span>
+                      : <div style={{ textAlign:"right" }}>
+                          <div style={{ fontSize:10, color:"rgba(255,255,255,0.6)", marginBottom:2 }}>Comm Rate</div>
+                          <div style={{ fontSize:13, fontWeight:700, color:"#fff" }}>{brand.commRate}%</div>
+                        </div>
+                    }
                   </div>
                   <div style={{ padding:"16px 18px" }}>
-                    <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:10, marginBottom:12 }}>
-                      {[
-                        ["GMV",      "$"+(brand.revenue/1000).toFixed(0)+"k",  "#fff"   ],
-                        ["ROAS",     brand.roas+"x",   brand.roas>=2.5?"#00e5a0":brand.roas>=1.5?"#f5c518":"#ff4d6d"],
-                        ["Margin",   brand.margin+"%", brand.margin>=25?"#00e5a0":brand.margin>=15?"#f5c518":"#ff4d6d"],
-                        ["Ad Spend", "$"+(brand.adSpend/1000).toFixed(1)+"k", "#ff6b35"],
-                        ["Rev Share",revShare+"%",     accent ],
-                        ["Comm %",   brand.commRate+"%","#c77dff"],
-                      ].map(([k,v,c])=>(
-                        <div key={k} style={{ background:"rgba(255,255,255,0.04)", borderRadius:7, padding:"8px 10px" }}>
-                          <div style={{ fontSize:8, color:"#444", letterSpacing:1, textTransform:"uppercase", marginBottom:3 }}>{k}</div>
-                          <div style={{ fontSize:14, fontWeight:700, color:c }}>{v}</div>
-                        </div>
-                      ))}
-                    </div>
-                    <div style={{ marginBottom:12 }}>
-                      <div style={{ height:4, background:"rgba(255,255,255,0.06)", borderRadius:2, overflow:"hidden" }}>
-                        <div style={{ height:"100%", width:(brand.revenue/maxRev*100)+"%", background:accent, borderRadius:2 }}/>
-                      </div>
-                      <div style={{ fontSize:9, color:"#444", marginTop:3 }}>{revShare}% of portfolio revenue</div>
-                    </div>
-                    {flags.length>0 && (
-                      <div style={{ display:"flex", flexDirection:"column", gap:5, marginBottom:12 }}>
-                        {flags.map((f,i)=>(
-                          <div key={i} style={{ fontSize:10, color:f.color, display:"flex", alignItems:"center", gap:6 }}>
-                            <div style={{ width:5, height:5, borderRadius:"50%", background:f.color, flexShrink:0 }}/>
-                            {f.text}
+                    {isPending
+                      ? <div style={{ fontSize:12, color:"#333", textAlign:"center", padding:"20px 0 16px" }}>Import data to activate this brand</div>
+                      : <>
+                          <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:10, marginBottom:12 }}>
+                            {[
+                              ["GMV",      brand.revenue>0?"$"+(brand.revenue/1000).toFixed(0)+"k":"—", "#fff"   ],
+                              ["ROAS",     brand.roas>0?brand.roas+"x":"—",   brand.roas>=2.5?"#00e5a0":brand.roas>=1.5?"#f5c518":brand.roas>0?"#ff4d6d":"#555"],
+                              ["Margin",   brand.margin>0?brand.margin+"%":"—", brand.margin>=25?"#00e5a0":brand.margin>=15?"#f5c518":brand.margin>0?"#ff4d6d":"#555"],
+                              ["Ad Spend", brand.adSpend>0?"$"+(brand.adSpend/1000).toFixed(1)+"k":"—", "#ff6b35"],
+                              ["Rev Share",totalRev>0&&brand.revenue>0?revShare+"%":"—", accent ],
+                              ["Comm %",   brand.commRate+"%","#c77dff"],
+                            ].map(([k,v,c])=>(
+                              <div key={k} style={{ background:"rgba(255,255,255,0.04)", borderRadius:7, padding:"8px 10px" }}>
+                                <div style={{ fontSize:8, color:"#444", letterSpacing:1, textTransform:"uppercase", marginBottom:3 }}>{k}</div>
+                                <div style={{ fontSize:14, fontWeight:700, color:c }}>{v}</div>
+                              </div>
+                            ))}
                           </div>
-                        ))}
-                      </div>
-                    )}
-                    <button onClick={()=>setActiveBrand(brand.id)} style={{ width:"100%", fontSize:12, fontWeight:700, padding:"9px 0", borderRadius:8, background:`${accent}14`, color:accent, border:`1px solid ${accent}33`, cursor:"pointer", letterSpacing:1, textTransform:"uppercase" }}>
-                      Open Dashboard →
+                          {brand.revenue>0&&(
+                            <div style={{ marginBottom:12 }}>
+                              <div style={{ height:4, background:"rgba(255,255,255,0.06)", borderRadius:2, overflow:"hidden" }}>
+                                <div style={{ height:"100%", width:(brand.revenue/maxRev*100)+"%", background:accent, borderRadius:2 }}/>
+                              </div>
+                              <div style={{ fontSize:9, color:"#444", marginTop:3 }}>{revShare}% of portfolio revenue</div>
+                            </div>
+                          )}
+                          {flags.length>0&&(
+                            <div style={{ display:"flex", flexDirection:"column", gap:5, marginBottom:12 }}>
+                              {flags.map((f,i)=>(
+                                <div key={i} style={{ fontSize:10, color:f.color, display:"flex", alignItems:"center", gap:6 }}>
+                                  <div style={{ width:5, height:5, borderRadius:"50%", background:f.color, flexShrink:0 }}/>
+                                  {f.text}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </>
+                    }
+                    <button onClick={()=>!isPending&&setActiveBrand(brand.id)}
+                      style={{ width:"100%", fontSize:12, fontWeight:700, padding:"9px 0", borderRadius:8, background:isPending?"rgba(255,255,255,0.03)":`${accent}14`, color:isPending?"#333":accent, border:isPending?"1px solid rgba(255,255,255,0.05)":`1px solid ${accent}33`, cursor:isPending?"default":"pointer", letterSpacing:1, textTransform:"uppercase" }}>
+                      {isPending ? "Pending Setup" : "Open Dashboard →"}
                     </button>
                   </div>
                 </div>
