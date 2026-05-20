@@ -1924,6 +1924,22 @@ function BrandDashboard({ brandId, brandName, brandColor, onBack }) {
   const [eukaView,       setEukaView]       = useState("overview");  // overview|creators|videos|campaigns
   const [eukaSortBy,     setEukaSortBy]     = useState("gmv");
   const [eukaVideoFilter,setEukaVideoFilter]= useState("all");
+  const [eukaDateFrom,   setEukaDateFrom]   = useState("");
+  const [eukaDateTo,     setEukaDateTo]     = useState("");
+  const [eukaCompareMode,setEukaCompareMode]= useState(false);
+  const [eukaCompareFrom,setEukaCompareFrom]= useState("");
+  const [eukaCompareTo,  setEukaCompareTo]  = useState("");
+  const [eukaCompareData,setEukaCompareData]= useState({});  // keyed by storeId, stores compare period result
+
+  // Quick date preset helper
+  const eukaPresets = [
+    { label:"Last 7d",  from:new Date(Date.now()-7*86400000).toISOString().slice(0,10),  to:new Date().toISOString().slice(0,10) },
+    { label:"Last 30d", from:new Date(Date.now()-30*86400000).toISOString().slice(0,10), to:new Date().toISOString().slice(0,10) },
+    { label:"Last 90d", from:new Date(Date.now()-90*86400000).toISOString().slice(0,10), to:new Date().toISOString().slice(0,10) },
+    { label:"This month", from:new Date(new Date().getFullYear(),new Date().getMonth(),1).toISOString().slice(0,10), to:new Date().toISOString().slice(0,10) },
+    { label:"Last month", from:new Date(new Date().getFullYear(),new Date().getMonth()-1,1).toISOString().slice(0,10), to:new Date(new Date().getFullYear(),new Date().getMonth(),0).toISOString().slice(0,10) },
+    { label:"All time",   from:"", to:"" },
+  ];
 
   // Get store id from the current brand context (brandId prop maps to EUKA_STORES)
   const currentEukaStore = Object.values(EUKA_STORES).find(s=>
@@ -2733,16 +2749,16 @@ function BrandDashboard({ brandId, brandName, brandColor, onBack }) {
             {/* ── EUKA AFFILIATE INTELLIGENCE ── */}
             <div style={{ marginTop:20 }}>
               {/* Header + controls */}
-              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16, flexWrap:"wrap", gap:10 }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:12, flexWrap:"wrap", gap:10 }}>
                 <div>
                   <div style={{ fontSize:9, letterSpacing:2, textTransform:"uppercase", color:"#c77dff", fontWeight:700, marginBottom:4 }}>Affiliate Intelligence — powered by Euka</div>
                   <div style={{ fontSize:11, color:"#555" }}>
                     {eukaData[currentEukaStore.id]
-                      ? `${eukaData[currentEukaStore.id].summary?.totalCreators?.toLocaleString()||0} total creators · ${eukaData[currentEukaStore.id].summary?.creatorsWithGmv?.toLocaleString()||0} with GMV · $${((eukaData[currentEukaStore.id].summary?.totalGmv||0)/1000).toFixed(1)}k all-time`
+                      ? `${eukaData[currentEukaStore.id].summary?.totalCreators?.toLocaleString()||0} total creators · ${eukaData[currentEukaStore.id].summary?.creatorsWithGmv?.toLocaleString()||0} with GMV · $${((eukaData[currentEukaStore.id].summary?.totalGmv||0)/1000).toFixed(1)}k${eukaDateFrom||eukaDateTo?" in period":" all-time"}`
                       : "Click Refresh to load live data from Euka"}
                   </div>
                 </div>
-                <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+                <div style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap" }}>
                   {/* View toggle */}
                   <div style={{ display:"flex", gap:0, background:"rgba(255,255,255,0.03)", borderRadius:7, padding:3, border:"1px solid rgba(255,255,255,0.07)" }}>
                     {[{id:"overview",label:"Overview"},{id:"creators",label:"Creators"},{id:"videos",label:"Videos"},{id:"campaigns",label:"Campaigns"}].map(v=>(
@@ -2753,9 +2769,13 @@ function BrandDashboard({ brandId, brandName, brandColor, onBack }) {
                   <button
                     onClick={async ()=>{
                       const storeId = currentEukaStore.id;
-                      setEukaLoading(l=>({...l,[storeId]:true}));
-                      setEukaError(e=>({...e,[storeId]:""}));
-                      try {
+                      const dateClause = eukaDateFrom||eukaDateTo
+                        ? ` Filter data to the period from ${eukaDateFrom||"the beginning"} to ${eukaDateTo||"today"}.`
+                        : " Use all-time data.";
+                      const fetchEuka = async (isCompare=false) => {
+                        const clause = isCompare
+                          ? (eukaCompareFrom||eukaCompareTo ? ` Filter data to the comparison period from ${eukaCompareFrom||"the beginning"} to ${eukaCompareTo||"today"}.` : dateClause)
+                          : dateClause;
                         const response = await fetch("https://api.anthropic.com/v1/messages", {
                           method:"POST",
                           headers:{ "Content-Type":"application/json" },
@@ -2763,7 +2783,7 @@ function BrandDashboard({ brandId, brandName, brandColor, onBack }) {
                             model:"claude-sonnet-4-20250514",
                             max_tokens:1000,
                             mcp_servers:[{ type:"url", url:"https://app.euka.ai/api/mcp", name:"euka-mcp" }],
-                            messages:[{ role:"user", content:`For Euka store ID ${storeId}, query this data and return ONLY a JSON object (no markdown, no preamble) with this exact structure:
+                            messages:[{ role:"user", content:`For Euka store ID ${storeId}, query affiliate performance data.${clause} Return ONLY a JSON object (no markdown, no preamble) with this exact structure:
 {
   "summary": { "totalCreators": number, "creatorsWithGmv": number, "totalGmv": number, "totalVideos": number, "videoHitRate": number, "samplesSent": number, "samplesShipped": number, "shipRate": number },
   "topCreators": [{ "handle": string, "followers": number, "gmv": number, "videos": number, "hitRate": number, "avgRevPerVideo": number }],
@@ -2777,8 +2797,19 @@ Limit arrays to top 25 rows each. Use null for missing values. Return only the J
                         const data = await response.json();
                         const text = data.content?.map(c=>c.text||"").join("") || "";
                         const clean = text.replace(/```json|```/g,"").trim();
-                        const parsed = JSON.parse(clean);
-                        setEukaData(prev=>({...prev,[storeId]:parsed}));
+                        return JSON.parse(clean);
+                      };
+                      setEukaLoading(l=>({...l,[storeId]:true}));
+                      setEukaError(e=>({...e,[storeId]:""}));
+                      try {
+                        const primary = await fetchEuka(false);
+                        setEukaData(prev=>({...prev,[storeId]:primary}));
+                        if (eukaCompareMode && (eukaCompareFrom||eukaCompareTo)) {
+                          const compare = await fetchEuka(true);
+                          setEukaCompareData(prev=>({...prev,[storeId]:compare}));
+                        } else {
+                          setEukaCompareData(prev=>({...prev,[storeId]:null}));
+                        }
                       } catch(err) {
                         setEukaError(e=>({...e,[storeId]:"Failed to load Euka data. Check your connection and try again."}));
                       } finally {
@@ -2788,6 +2819,48 @@ Limit arrays to top 25 rows each. Use null for missing values. Return only the J
                     style={{ fontSize:11, fontWeight:700, padding:"7px 16px", borderRadius:7, background:"rgba(199,125,255,0.1)", color:"#c77dff", border:"1px solid rgba(199,125,255,0.25)", cursor:"pointer", display:"flex", alignItems:"center", gap:6 }}>
                     {eukaLoading[currentEukaStore.id] ? "⟳ Loading..." : "⟳ Refresh"}
                   </button>
+                </div>
+              </div>
+
+              {/* Date controls */}
+              <div style={{ ...S.card, marginBottom:16, padding:"12px 16px", background:"rgba(199,125,255,0.03)", border:"1px solid rgba(199,125,255,0.12)" }}>
+                {/* Quick presets */}
+                <div style={{ display:"flex", gap:6, flexWrap:"wrap", alignItems:"center", marginBottom:10 }}>
+                  <span style={{ fontSize:10, color:"#555", marginRight:2 }}>Period:</span>
+                  {eukaPresets.map(p=>{
+                    const isActive = eukaDateFrom===p.from && eukaDateTo===p.to;
+                    return (
+                      <button key={p.label} onClick={()=>{ setEukaDateFrom(p.from); setEukaDateTo(p.to); }} style={{ fontSize:10, fontWeight:700, padding:"3px 10px", borderRadius:20, cursor:"pointer", background:isActive?"rgba(199,125,255,0.15)":"rgba(255,255,255,0.04)", color:isActive?"#c77dff":"#555", border:`1px solid ${isActive?"rgba(199,125,255,0.4)":"rgba(255,255,255,0.08)"}` }}>{p.label}</button>
+                    );
+                  })}
+                </div>
+
+                {/* Custom date range */}
+                <div style={{ display:"flex", gap:12, alignItems:"center", flexWrap:"wrap" }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                    <span style={{ fontSize:10, color:"#555" }}>From:</span>
+                    <input type="date" value={eukaDateFrom} onChange={e=>setEukaDateFrom(e.target.value)} style={{ background:"rgba(255,255,255,0.06)", border:"1px solid rgba(255,255,255,0.12)", borderRadius:6, padding:"3px 8px", color:"#e8e8f0", fontFamily:"inherit", fontSize:11, outline:"none" }}/>
+                    <span style={{ fontSize:10, color:"#555" }}>To:</span>
+                    <input type="date" value={eukaDateTo} onChange={e=>setEukaDateTo(e.target.value)} style={{ background:"rgba(255,255,255,0.06)", border:"1px solid rgba(255,255,255,0.12)", borderRadius:6, padding:"3px 8px", color:"#e8e8f0", fontFamily:"inherit", fontSize:11, outline:"none" }}/>
+                    {(eukaDateFrom||eukaDateTo) && <button onClick={()=>{ setEukaDateFrom(""); setEukaDateTo(""); }} style={{ fontSize:10, color:"#ff4d6d", background:"transparent", border:"none", cursor:"pointer" }}>✕ Clear</button>}
+                  </div>
+
+                  {/* Compare toggle */}
+                  <div style={{ display:"flex", alignItems:"center", gap:8, borderLeft:"1px solid rgba(255,255,255,0.07)", paddingLeft:12 }}>
+                    <button onClick={()=>setEukaCompareMode(m=>!m)} style={{ fontSize:10, fontWeight:700, padding:"3px 12px", borderRadius:20, cursor:"pointer", background:eukaCompareMode?"rgba(245,197,24,0.12)":"rgba(255,255,255,0.04)", color:eukaCompareMode?"#f5c518":"#555", border:`1px solid ${eukaCompareMode?"rgba(245,197,24,0.3)":"rgba(255,255,255,0.08)"}` }}>
+                      {eukaCompareMode?"▼ Compare On":"+ Compare Period"}
+                    </button>
+                    {eukaCompareMode && (
+                      <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                        <span style={{ fontSize:10, color:"#f5c518", fontWeight:700 }}>vs:</span>
+                        <input type="date" value={eukaCompareFrom} onChange={e=>setEukaCompareFrom(e.target.value)} style={{ background:"rgba(255,255,255,0.06)", border:"1px solid rgba(245,197,24,0.3)", borderRadius:6, padding:"3px 8px", color:"#f5c518", fontFamily:"inherit", fontSize:11, outline:"none" }}/>
+                        <span style={{ fontSize:10, color:"#555" }}>→</span>
+                        <input type="date" value={eukaCompareTo} onChange={e=>setEukaCompareTo(e.target.value)} style={{ background:"rgba(255,255,255,0.06)", border:"1px solid rgba(245,197,24,0.3)", borderRadius:6, padding:"3px 8px", color:"#f5c518", fontFamily:"inherit", fontSize:11, outline:"none" }}/>
+                        {(eukaCompareFrom||eukaCompareTo)&&<button onClick={()=>{ setEukaCompareFrom(""); setEukaCompareTo(""); }} style={{ fontSize:10, color:"#ff4d6d", background:"transparent", border:"none", cursor:"pointer" }}>✕</button>}
+                      </div>
+                    )}
+                  </div>
+                  <div style={{ fontSize:10, color:"#444", marginLeft:"auto" }}>Hit Refresh after changing dates to reload data</div>
                 </div>
               </div>
 
@@ -2854,16 +2927,28 @@ Limit arrays to top 25 rows each. Use null for missing values. Return only the J
                     {/* Key metrics */}
                     <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:12, marginBottom:16 }}>
                       {[
-                        ["Total Affiliate GMV",   "$"+(((summary.totalGmv||0)/1000).toFixed(1))+"k", "#c77dff"],
-                        ["Video Hit Rate",         (summary.videoHitRate||0)+"%", summary.videoHitRate>=15?"#00e5a0":summary.videoHitRate>=10?"#f5c518":"#ff4d6d"],
-                        ["Total Videos",           (summary.totalVideos||0).toLocaleString(), "#aaa"],
-                        ["Ship Rate",              (summary.shipRate||0)+"%", summary.shipRate>=60?"#00e5a0":summary.shipRate>=40?"#f5c518":"#ff4d6d"],
-                      ].map(([k,v,c])=>(
-                        <div key={k} style={{ ...S.card, textAlign:"center" }}>
-                          <div style={{ fontSize:9, color:"#444", letterSpacing:1.5, textTransform:"uppercase", fontWeight:700, marginBottom:8 }}>{k}</div>
-                          <div style={{ fontSize:22, fontWeight:700, color:c }}>{v}</div>
-                        </div>
-                      ))}
+                        ["Total Affiliate GMV",   "$"+(((summary.totalGmv||0)/1000).toFixed(1))+"k", "#c77dff", "totalGmv"],
+                        ["Video Hit Rate",         (summary.videoHitRate||0)+"%", summary.videoHitRate>=15?"#00e5a0":summary.videoHitRate>=10?"#f5c518":"#ff4d6d", "videoHitRate"],
+                        ["Total Videos",           (summary.totalVideos||0).toLocaleString(), "#aaa", "totalVideos"],
+                        ["Ship Rate",              (summary.shipRate||0)+"%", summary.shipRate>=60?"#00e5a0":summary.shipRate>=40?"#f5c518":"#ff4d6d", "shipRate"],
+                      ].map(([k,v,c,field])=>{
+                        const cmp = eukaCompareData[currentEukaStore.id]?.summary;
+                        const cur = summary[field]||0;
+                        const prev = cmp?.[field]||0;
+                        const delta = prev>0 ? r2(((cur-prev)/prev)*100) : null;
+                        const isPos = delta>=0;
+                        return (
+                          <div key={k} style={{ ...S.card, textAlign:"center" }}>
+                            <div style={{ fontSize:9, color:"#444", letterSpacing:1.5, textTransform:"uppercase", fontWeight:700, marginBottom:8 }}>{k}</div>
+                            <div style={{ fontSize:22, fontWeight:700, color:c }}>{v}</div>
+                            {delta!==null && (
+                              <div style={{ fontSize:11, fontWeight:700, color:isPos?"#00e5a0":"#ff4d6d", marginTop:4 }}>
+                                {isPos?"+":""}{delta}% vs compare period
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
 
                     {/* Monthly GMV trend */}
@@ -2889,41 +2974,49 @@ Limit arrays to top 25 rows each. Use null for missing values. Return only the J
                 );
 
                 // ── CREATORS ──
-                if (eukaView==="creators") return (
-                  <div style={S.card}>
-                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
-                      <div style={{ fontSize:9, letterSpacing:2, textTransform:"uppercase", color:"#444", fontWeight:700 }}>Top Creators by {eukaSortBy==="gmv"?"GMV":eukaSortBy==="videos"?"Videos":eukaSortBy==="hitrate"?"Hit Rate":"Avg Rev/Video"}</div>
-                      <div style={{ display:"flex", gap:6 }}>
-                        {["gmv","videos","hitrate","avgrev"].map(s=>(
-                          <button key={s} onClick={()=>setEukaSortBy(s)} style={{ fontSize:9, fontWeight:700, padding:"2px 8px", borderRadius:20, cursor:"pointer", background:eukaSortBy===s?"rgba(199,125,255,0.12)":"transparent", color:eukaSortBy===s?"#c77dff":"#555", border:`1px solid ${eukaSortBy===s?"rgba(199,125,255,0.3)":"rgba(255,255,255,0.07)"}` }}>
-                            {s==="gmv"?"GMV":s==="videos"?"Videos":s==="hitrate"?"Hit Rate":"Avg Rev"}
-                          </button>
-                        ))}
+                if (eukaView==="creators") {
+                  const cmpCreators = eukaCompareData[currentEukaStore.id]?.topCreators||[];
+                  return (
+                    <div style={S.card}>
+                      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+                        <div style={{ fontSize:9, letterSpacing:2, textTransform:"uppercase", color:"#444", fontWeight:700 }}>Top Creators by {eukaSortBy==="gmv"?"GMV":eukaSortBy==="videos"?"Videos":eukaSortBy==="hitrate"?"Hit Rate":"Avg Rev/Video"}</div>
+                        <div style={{ display:"flex", gap:6 }}>
+                          {["gmv","videos","hitrate","avgrev"].map(s=>(
+                            <button key={s} onClick={()=>setEukaSortBy(s)} style={{ fontSize:9, fontWeight:700, padding:"2px 8px", borderRadius:20, cursor:"pointer", background:eukaSortBy===s?"rgba(199,125,255,0.12)":"transparent", color:eukaSortBy===s?"#c77dff":"#555", border:`1px solid ${eukaSortBy===s?"rgba(199,125,255,0.3)":"rgba(255,255,255,0.07)"}` }}>
+                              {s==="gmv"?"GMV":s==="videos"?"Videos":s==="hitrate"?"Hit Rate":"Avg Rev"}
+                            </button>
+                          ))}
+                        </div>
                       </div>
+                      <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
+                        <thead><tr>{["Creator","Followers","GMV",cmpCreators.length?"vs Prior":"","Videos","Hit Rate","Avg Rev/Video"].map(h=><th key={h} style={{ ...S.th, fontSize:8 }}>{h}</th>)}</tr></thead>
+                        <tbody>
+                          {[...creators].sort((a,b)=>{
+                            if (eukaSortBy==="videos")  return (b.videos||0)-(a.videos||0);
+                            if (eukaSortBy==="hitrate")  return (b.hitRate||0)-(a.hitRate||0);
+                            if (eukaSortBy==="avgrev")   return (b.avgRevPerVideo||0)-(a.avgRevPerVideo||0);
+                            return (b.gmv||0)-(a.gmv||0);
+                          }).map((c,i)=>{
+                            const cmp = cmpCreators.find(x=>x.handle===c.handle);
+                            const delta = cmp&&cmp.gmv>0 ? r2(((c.gmv||0)-cmp.gmv)/cmp.gmv*100) : null;
+                            return (
+                              <tr key={i}>
+                                <td style={S.td}><span style={{ fontWeight:700, color:"#c77dff" }}>{c.handle||"—"}</span></td>
+                                <td style={S.td}><span style={{ color:"#aaa" }}>{c.followers>0?(c.followers/1000).toFixed(0)+"K":"—"}</span></td>
+                                <td style={S.td}><span style={{ fontWeight:700 }}>{c.gmv>0?"$"+(c.gmv/1000).toFixed(1)+"k":"—"}</span></td>
+                                {cmpCreators.length>0&&<td style={S.td}>{delta!==null?<span style={{ fontSize:10, fontWeight:700, color:delta>=0?"#00e5a0":"#ff4d6d" }}>{delta>=0?"+":""}{delta}%</span>:<span style={{ color:"#444" }}>—</span>}</td>}
+                                <td style={S.td}>{c.videos||"—"}</td>
+                                <td style={S.td}><span style={{ color:(c.hitRate||0)>=20?"#00e5a0":(c.hitRate||0)>=10?"#f5c518":"#ff4d6d" }}>{c.hitRate!=null?c.hitRate+"%":"—"}</span></td>
+                                <td style={S.td}><span style={{ color:"#00e5a0" }}>{c.avgRevPerVideo>0?"$"+r2(c.avgRevPerVideo):"—"}</span></td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                      {creators.length===0&&<div style={{ padding:"30px 0", textAlign:"center", color:"#555", fontSize:12 }}>No creator data — click Refresh to load from Euka.</div>}
                     </div>
-                    <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
-                      <thead><tr>{["Creator","Followers","Total GMV","Videos","Hit Rate","Avg Rev/Video"].map(h=><th key={h} style={{ ...S.th, fontSize:8 }}>{h}</th>)}</tr></thead>
-                      <tbody>
-                        {[...creators].sort((a,b)=>{
-                          if (eukaSortBy==="videos")  return (b.videos||0)-(a.videos||0);
-                          if (eukaSortBy==="hitrate")  return (b.hitRate||0)-(a.hitRate||0);
-                          if (eukaSortBy==="avgrev")   return (b.avgRevPerVideo||0)-(a.avgRevPerVideo||0);
-                          return (b.gmv||0)-(a.gmv||0);
-                        }).map((c,i)=>(
-                          <tr key={i}>
-                            <td style={S.td}><span style={{ fontWeight:700, color:"#c77dff" }}>{c.handle||"—"}</span></td>
-                            <td style={S.td}><span style={{ color:"#aaa" }}>{c.followers>0?(c.followers/1000).toFixed(0)+"K":"—"}</span></td>
-                            <td style={S.td}><span style={{ fontWeight:700 }}>{c.gmv>0?"$"+(c.gmv/1000).toFixed(1)+"k":"—"}</span></td>
-                            <td style={S.td}>{c.videos||"—"}</td>
-                            <td style={S.td}><span style={{ color:(c.hitRate||0)>=20?"#00e5a0":(c.hitRate||0)>=10?"#f5c518":"#ff4d6d" }}>{c.hitRate!=null?c.hitRate+"%":"—"}</span></td>
-                            <td style={S.td}><span style={{ color:"#00e5a0" }}>{c.avgRevPerVideo>0?"$"+r2(c.avgRevPerVideo):"—"}</span></td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                    {creators.length===0&&<div style={{ padding:"30px 0", textAlign:"center", color:"#555", fontSize:12 }}>No creator data — click Refresh to load from Euka.</div>}
-                  </div>
-                );
+                  );
+                }
 
                 // ── VIDEOS ──
                 if (eukaView==="videos") {
