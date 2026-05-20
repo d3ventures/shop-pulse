@@ -6,16 +6,19 @@ export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Headers", "*");
 
   if (req.method === "OPTIONS") {
-    res.status(200).end();
-    return;
+    return res.status(200).end();
   }
 
   if (req.method !== "POST") {
-    res.status(405).end();
-    return;
+    return res.status(405).json({ error: "Method not allowed" });
   }
 
   try {
+    const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
+
+    console.log("Model:", body?.model);
+    console.log("Has MCP servers:", !!body?.mcp_servers);
+
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -24,12 +27,16 @@ export default async function handler(req, res) {
         "anthropic-version": "2023-06-01",
         "anthropic-beta": "mcp-client-2025-04-04",
       },
-      body: JSON.stringify(req.body),
+      body: JSON.stringify(body),
     });
 
-    const data = await response.json();
-    res.status(response.status).json(data);
+    const text = await response.text();
+    console.log("Anthropic status:", response.status);
+    if (!response.ok) console.log("Anthropic error:", text.slice(0, 300));
+
+    res.status(response.status).setHeader("Content-Type", "application/json").send(text);
   } catch (err) {
+    console.error("Handler error:", err.message);
     res.status(500).json({ error: err.message });
   }
 }
